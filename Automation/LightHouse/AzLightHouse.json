@@ -36,6 +36,18 @@
         "principalTenantId": "[parameters('managingTenantId')]",
 		"principalType": "ServicePrincipal"
       }
-    }
+    },
+	{
+	  "type": "Microsoft.Authorization/roleAssignments",
+	  "apiVersion": "2022-04-01",
+	  "name": "[guid(parameters('managingPrincipalId'), 'reader-sub')]",
+	  "scope": "[subscription().id]",
+	  "properties": {
+		"roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions','acdd72a7-3385-48ef-bd42-f606fba81ae7')]", // Reader
+		"principalId": "[parameters('managingPrincipalId')]",
+		"principalTenantId": "[parameters('managingTenantId')]",
+		"principalType": "ServicePrincipal"
+		}
+	}
   ]
 }
