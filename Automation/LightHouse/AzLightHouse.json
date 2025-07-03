@@ -10,7 +10,7 @@
       }
     },
     "managingPrincipalId": {
-      "defaultValue": "6d5217b6-cfbc-4e34-a225-8bcb919ef307",
+      "defaultValue": "75f1bb43-cfe5-4b12-93c0-9ef825b30861", 
       "type": "string",
       "metadata": {
         "description": "Object ID of the service principal in your Defender tenant"
