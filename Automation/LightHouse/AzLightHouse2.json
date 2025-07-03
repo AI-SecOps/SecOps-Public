@@ -1,0 +1,66 @@
+{
+ "$schema": "https://schema.management.azure.com/schemas/2019-08-01/subscriptionDeploymentTemplate.json#",
+ "contentVersion": "1.0.0.0",
+ "parameters": {
+  "mspOfferName": {
+   "type": "string",
+   "metadata": {
+    "description": "Specify a unique name for your offer"
+   },
+   "defaultValue": "MonitorInXDR"
+  },
+  "mspOfferDescription": {
+   "type": "string",
+   "metadata": {
+    "description": "Name of the Managed Service Provider offering"
+   },
+   "defaultValue": ""
+  }
+ },
+ "variables": {
+  "mspRegistrationName": "[guid(parameters('mspOfferName'))]",
+  "mspAssignmentName": "[guid(parameters('mspOfferName'))]",
+  "managedByTenantId": "4d7f1e12-3dc1-455b-88b6-787ac9347928",
+  "authorizations": [
+   {
+    "principalId": "94d218d2-f775-41a5-8b37-8fbbcb7d381e",
+    "roleDefinitionId": "ab8e14d6-4a74-4a29-9ba8-549422addade",
+    "principalIdDisplayName": "DefenderLighthouseSP"
+   }
+  ]
+ },
+ "resources": [
+  {
+   "type": "Microsoft.ManagedServices/registrationDefinitions",
+   "apiVersion": "2020-02-01-preview",
+   "name": "[variables('mspRegistrationName')]",
+   "properties": {
+    "registrationDefinitionName": "[parameters('mspOfferName')]",
+    "description": "[parameters('mspOfferDescription')]",
+    "managedByTenantId": "[variables('managedByTenantId')]",
+    "authorizations": "[variables('authorizations')]"
+   }
+  },
+  {
+   "type": "Microsoft.ManagedServices/registrationAssignments",
+   "apiVersion": "2020-02-01-preview",
+   "name": "[variables('mspAssignmentName')]",
+   "dependsOn": [
+    "[resourceId('Microsoft.ManagedServices/registrationDefinitions/', variables('mspRegistrationName'))]"
+   ],
+   "properties": {
+    "registrationDefinitionId": "[resourceId('Microsoft.ManagedServices/registrationDefinitions/', variables('mspRegistrationName'))]"
+   }
+  }
+ ],
+ "outputs": {
+  "mspOfferName": {
+   "type": "string",
+   "value": "[concat('Managed by', ' ', parameters('mspOfferName'))]"
+  },
+  "authorizations": {
+   "type": "array",
+   "value": "[variables('authorizations')]"
+  }
+ }
+}
