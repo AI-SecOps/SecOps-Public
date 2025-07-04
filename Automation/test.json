@@ -15,7 +15,8 @@
         "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",
         "connections_rss_externalid": "[resourceId('Microsoft.Web/connections/', 'rss')]",
         "connections_azureopenai_externalid": "[resourceId('Microsoft.Web/connections/', 'azureopenai')]",
-        "connections_conversionservice_externalid": "[resourceId('Microsoft.Web/connections/', 'conversionservice')]"
+        "connections_conversionservice_externalid": "[resourceId('Microsoft.Web/connections/', 'conversionservice')]",
+        "resourceGroupLocation": "[resourceGroup().location]"
     },
     "resources": [
         {
@@ -472,12 +473,12 @@
                     "$connections": {
                         "value": {
                             "rss": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', [resourceGroup().location], 'rss')]",
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'rss')]",
                                 "connectionId": "[variables('connections_rss_externalid')]",
                                 "connectionName": "[variables('rssConnectionName')]"
                             },
                             "azureopenai": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', [resourceGroup().location], 'azureopenai')]",
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'azureopenai')]",
                                 "connectionId": "[parameters('connections_azureopenai_externalid')]",
                                 "connectionName": "azureopenai",
                                 "connectionProperties": {
@@ -488,7 +489,7 @@
                                 }
                             },
                             "conversionservice": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', [resourceGroup().location], 'conversionservice')]",
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'conversionservice')]",
                                 "connectionId": "[variables('connections_conversionservice_externalid')]",
                                 "connectionName": "conversionservice"
                             }
