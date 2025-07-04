@@ -479,7 +479,7 @@
                             },
                             "azureopenai": {
                                 "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'azureopenai')]",
-                                "connectionId": "[parameters('connections_azureopenai_externalid')]",
+                                "connectionId": "[variables('connections_azureopenai_externalid')]",
                                 "connectionName": "azureopenai",
                                 "connectionProperties": {
                                     "authentication": {
