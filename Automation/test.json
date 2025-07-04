@@ -475,7 +475,7 @@
                             "rss": {
                                 "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'rss')]",
                                 "connectionId": "[variables('connections_rss_externalid')]",
-                                "connectionName": "[variables('rssConnectionName')]"
+                                "connectionName": "rss"
                             },
                             "azureopenai": {
                                 "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'azureopenai')]",
