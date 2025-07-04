@@ -8,7 +8,10 @@
         },
         "userAssignedIdentityName": {
             "defaultValue": "AzOpenAI_MI",
-            "type": "String"
+            "type": "String",
+            "metadata": {
+                "description": "This is the User Assigned Managed Identity with 'Cognitive Services OpenAI User' Role at resource level"
+            }
         }
     },
     "variables": {
@@ -22,6 +25,10 @@
         {
             "type": "Microsoft.Logic/workflows",
             "apiVersion": "2017-07-01",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('connections_rss_externalid'))]",
+                "[resourceId('Microsoft.Web/connections', variables('connections_azureopenai_externalid'))]"
+            ],
             "name": "[parameters('LogicAppName')]",
             "location": "[resourceGroup().location]",
             "identity": {
@@ -495,6 +502,36 @@
                             }
                         }
                     }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "rss",
+            "location": "[variables('resourceGroupLocation')]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "rss",
+                "customParameterValues": {},
+                "api": {
+                    "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'rss')]"
+                }
+            }
+        },
+        {
+        "type": "Microsoft.Web/connections",
+        "apiVersion": "2016-06-01",
+        "name": "conversionservice",
+        "location": "[resourceGroup().location]",
+        "properties": {
+            "displayName": "Conversion Service Connector",
+            "api": {
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'),'conversionservice')]"
+            },
+            "parameterValueSet": {
+                "name": "managedIdentityAuth",
+                "values": {}
                 }
             }
         }
