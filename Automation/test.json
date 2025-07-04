@@ -472,12 +472,12 @@
                     "$connections": {
                         "value": {
                             "rss": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'rss')]",
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', [resourceGroup().location], 'rss')]",
                                 "connectionId": "[variables('connections_rss_externalid')]",
                                 "connectionName": "[variables('rssConnectionName')]"
                             },
                             "azureopenai": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azureopenai')]",
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', [resourceGroup().location], 'azureopenai')]",
                                 "connectionId": "[parameters('connections_azureopenai_externalid')]",
                                 "connectionName": "azureopenai",
                                 "connectionProperties": {
@@ -488,7 +488,7 @@
                                 }
                             },
                             "conversionservice": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'conversionservice')]",
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', [resourceGroup().location], 'conversionservice')]",
                                 "connectionId": "[variables('connections_conversionservice_externalid')]",
                                 "connectionName": "conversionservice"
                             }
