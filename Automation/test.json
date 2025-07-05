@@ -357,6 +357,11 @@
                             },
                             "type": "If"
                         },
+                        "Entity": {  
+                            "runAfter": {},  
+                            "type": "Compose",  
+                            "inputs": "@triggerBody()?['Entity']?['properties']?['Address']"  
+                        },  
                         "Select_Value_Field": {
                             "runAfter": {
                                 "Get_Indicators_List": [
@@ -383,12 +388,7 @@
                                 "from": "@body('Select_Value_Field')",
                                 "where": "@contains(item()['indicatorValue'],outputs('Entity'))"
                             }
-                        },
-                        "Entity": {
-                            "runAfter": {},
-                            "type": "Compose",
-                            "inputs": "@triggerBody()?['Entity']?['properties']?['Address']"
-                        }               
+                        }        
                     },
                     "outputs": {}
                 },
