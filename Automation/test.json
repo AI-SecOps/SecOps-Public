@@ -458,7 +458,6 @@
             "type": "Microsoft.Web/connections",
             "apiVersion": "2016-06-01",
             "name": "[parameters('AzureSentinelAPI')]",
-            "dependsOn": ["[guid(concat(parameters('userAssignedIdentityName'), parameters('LogAnalyticsWorkspaceName')))]"],
             "location": "[variables('resourceGroupLocation')]",
             "kind": "V1",
             "properties": {
@@ -477,7 +476,6 @@
             "type": "Microsoft.Web/connections",
             "apiVersion": "2016-06-01",
             "name": "[parameters('LogAnalyticsAPI')]",
-            "dependsOn": ["[guid(concat(parameters('userAssignedIdentityName'), parameters('LogAnalyticsWorkspaceName')))]"],
             "location": "[variables('resourceGroupLocation')]",
             "kind": "V1",
             "properties": {
@@ -487,11 +485,8 @@
                     "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('LogAnalyticsAPI'))]"
                 },
                 "parameterValueSet": {
-                    "name": "managedIdentityAuth",
-                    "values": {}
-                },
-                "parameterValues": {
-                    "workspaceResourceId": "[variables('logAnalyticsID')]"
+                    "username": "[reference(variables('logAnalyticsID'), '2015-03-20').customerId]",
+                    "password": "[listKeys(variables('logAnalyticsID'), '2015-03-20').primarySharedKey]"
                 }
             }
         }       
