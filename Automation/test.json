@@ -462,7 +462,7 @@
                 "displayName": "[parameters('AzureSentinelAPI')]",
                 "customParameterValues": {},
                 "api": {
-                    "id": "[variables('connections_azuresentinel_externalid')]"
+                    "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('AzureSentinelAPI'))]"
                 },
                 "parameterValues": {
                     "workspaceResourceId": "[parameters('LogAnalyticsWorkspaceName')]"
@@ -480,7 +480,7 @@
             "properties": {
                 "displayName": "[parameters('LogAnalyticsAPI')]",
                 "api": {
-                    "id": "[variables('connections_azuremonitorlogs_externalid')]"
+                    "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('LogAnalyticsAPI'))]"
                 },
                 "parameterValues": {
                     "workspaceResourceId": "[parameters('LogAnalyticsWorkspaceName')]"
