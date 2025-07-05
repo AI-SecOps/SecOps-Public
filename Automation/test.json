@@ -48,6 +48,7 @@
     "variables": {
         "resourceGroupLocation": "[resourceGroup().location]",
         "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",
+        "logAnalyticsID": "[concat('/subscriptions/', subscription().subscriptionId,'/resourcegroups/', resourceGroup().name,'/providers/microsoft.operationalinsights/workspaces/',parameters('LogAnalyticsWorkspaceName'))]",
         "connections_azuresentinel_externalid": "[resourceId('Microsoft.Web/connections/', parameters('AzureSentinelAPI'))]",
         "connections_azuremonitorlogs_externalid": "[resourceId('Microsoft.Web/connections/', parameters('LogAnalyticsAPI'))]",
         "connections_teams_externalid": "[resourceId('Microsoft.Web/connections/', 'teams')]",
@@ -455,41 +456,39 @@
         },
         {
             "type": "Microsoft.Web/connections",
-            "apiVersion": "2018-07-01-preview",
+            "apiVersion": "2016-06-01",
             "name": "[parameters('AzureSentinelAPI')]",
+            "dependsOn": ["[guid(concat(parameters('userAssignedIdentityName'), parameters('LogAnalyticsWorkspaceName')))]"],
             "location": "[variables('resourceGroupLocation')]",
+            "kind": "V1",
             "properties": {
                 "displayName": "[parameters('AzureSentinelAPI')]",
                 "customParameterValues": {},
                 "api": {
                     "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('AzureSentinelAPI'))]"
                 },
-                "parameterValues": {
-                    "workspaceResourceId": "[parameters('LogAnalyticsWorkspaceName')]"
-                },
-                "authentication": {
-                    "type": "ManagedServiceIdentity"
+                "parameterValues": { 
+                    "username": "[reference(variables('logAnalyticsID'), '2015-03-20').customerId]",
+                    "password": "[listKeys(variables('logAnalyticsID'), '2015-03-20').primarySharedKey]"
                 }
             }
         },
         {
             "type": "Microsoft.Web/connections",
-            "apiVersion": "2018-07-01-preview",
+            "apiVersion": "2016-06-01",
             "name": "[parameters('LogAnalyticsAPI')]",
+            "dependsOn": ["[guid(concat(parameters('userAssignedIdentityName'), parameters('LogAnalyticsWorkspaceName')))]"],
             "location": "[variables('resourceGroupLocation')]",
+            "kind": "V1",
             "properties": {
                 "displayName": "[parameters('LogAnalyticsAPI')]",
+                "customParameterValues": {},
                 "api": {
                     "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('LogAnalyticsAPI'))]"
                 },
-                "parameterValues": {
-                    "workspaceResourceId": "[parameters('LogAnalyticsWorkspaceName')]"
-                },
-                "authentication": {
-                    "type": "ManagedServiceIdentity",
-                    "identity": {
-                        "clientId": "[reference(variables('userAssignedIdentityId'), '2018-11-30').clientId]"
-                }
+                "parameterValues": { 
+                    "username": "[reference(variables('logAnalyticsID'), '2015-03-20').customerId]",
+                    "password": "[listKeys(variables('logAnalyticsID'), '2015-03-20').primarySharedKey]"
                 }
             }
         }       
