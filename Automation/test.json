@@ -307,7 +307,7 @@
                                                 },
                                                 "method": "post",
                                                 "body": {
-                                                    "query": "[concat('SentinelHealth\n| where TimeGenerated > ago(4h)\n| where SentinelResourceName == ''', parameters('workflows_Block_IP_on_Endpoint_name'), '''\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ ''@{outputs(''Incident_ARM_ID'')}''\n| sort by TimeGenerated desc')]",
+                                                    "query": "[concat('SentinelHealth\n| where TimeGenerated > ago(4h)\n| where SentinelResourceName == ''', parameters('LogicAppName'), '''\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ ''@{outputs(''Incident_ARM_ID'')}''\n| sort by TimeGenerated desc')]",
                                                     "timerangetype": "2",
                                                     "timerange": {
                                                         "relativeTimeRange": "Last 4 hours"
