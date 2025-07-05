@@ -388,7 +388,7 @@
                             "runAfter": {},
                             "type": "Compose",
                             "inputs": "@triggerBody()?['Entity']?['properties']?['Address']"
-                        }                        
+                        }               
                     },
                     "outputs": {}
                 },
