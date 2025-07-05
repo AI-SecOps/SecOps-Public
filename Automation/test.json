@@ -467,9 +467,9 @@
                 "api": {
                     "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('AzureSentinelAPI'))]"
                 },
-                "parameterValues": { 
-                    "username": "[reference(variables('logAnalyticsID'), '2015-03-20').customerId]",
-                    "password": "[listKeys(variables('logAnalyticsID'), '2015-03-20').primarySharedKey]"
+                "parameterValueSet": {
+                    "name": "managedIdentityAuth",
+                    "values": {}
                 }
             }
         },
