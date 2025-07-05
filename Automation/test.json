@@ -100,7 +100,11 @@
                     },
                     "actions": {
                         "Get_Indicators_List": {
-                            "runAfter": {},
+                            "runAfter": {
+                                "Entity": [
+                                    "Succeeded"
+                                ]
+                            },
                             "type": "Http",
                             "inputs": {
                                 "uri": "https://api.securitycenter.microsoft.com/api/indicators",
