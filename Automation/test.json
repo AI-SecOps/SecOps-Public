@@ -455,7 +455,7 @@
         },
         {
             "type": "Microsoft.Web/connections",
-            "apiVersion": "2016-06-01",
+            "apiVersion": "2019-05-01",
             "name": "[parameters('AzureSentinelAPI')]",
             "location": "[variables('resourceGroupLocation')]",
             "identity": {
@@ -477,7 +477,7 @@
         },
         {
             "type": "Microsoft.Web/connections",
-            "apiVersion": "2016-06-01",
+            "apiVersion": "2019-05-01",
             "name": "[parameters('LogAnalyticsAPI')]",
             "location": "[variables('resourceGroupLocation')]",
             "identity": {
