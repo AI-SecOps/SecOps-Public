@@ -54,8 +54,9 @@
           "createIncident": true,  
           "groupingConfiguration": {  
             "enabled": false,  
-            "reopenClosedIncident": false  
-          }  
+          "reopenClosedIncident": false,  
+          "lookbackDuration": "PT5H"  
+         }  
         },    
         "eventGroupingSettings": {  
           "aggregationKind": "SingleAlert"  
