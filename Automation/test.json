@@ -53,9 +53,10 @@
         "incidentConfiguration": {  
           "createIncident": true,  
           "groupingConfiguration": {  
-            "enabled": false  
+            "enabled": false,  
+            "reopenClosedIncident": false  
           }  
-        },  
+        },    
         "eventGroupingSettings": {  
           "aggregationKind": "SingleAlert"  
         },  
