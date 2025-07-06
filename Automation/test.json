@@ -3,6 +3,7 @@
   "contentVersion": "1.0.0.0",  
   "parameters": {  
     "workspaceName": {  
+      "defaultValue": "GoogleLab-Workspace",
       "type": "string",  
       "metadata": { "description": "The name of the Sentinel Workspace" }  
     },  
