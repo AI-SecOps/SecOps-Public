@@ -52,11 +52,15 @@
         "suppressionEnabled": false,  
         "incidentConfiguration": {  
           "createIncident": true,  
-          "groupingConfiguration": {  
-            "enabled": false,  
-          "reopenClosedIncident": false,  
-          "lookbackDuration": "PT5H"  
-         }  
+          "groupingConfiguration": {
+            "enabled": false,
+            "reopenClosedIncident": false,
+            "lookbackDuration": "PT5H",
+            "matchingMethod": "AllEntities",
+            "groupByEntities": [],
+            "groupByAlertDetails": [],
+            "groupByCustomDetails": []
+          }
         },    
         "eventGroupingSettings": {  
           "aggregationKind": "SingleAlert"  
