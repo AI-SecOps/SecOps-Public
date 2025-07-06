@@ -4,14 +4,17 @@
   "parameters": {
     "workspaceName": {
       "type": "string",
+      "defaultValue": "GoogleLab-Workspace",
       "metadata": { "description": "Log Analytics workspace name" }
     },
     "displayName": {
       "type": "string",
+      "defaultValue": "AWS CloudTrail IP Threat Intelligence Match",
       "metadata": { "description": "Display name of the analytic rule" }
     },
     "description": {
       "type": "string",
+      "defaultValue": "Detects AWS CloudTrail events where the source IP matches threat intelligence indicators.",
       "metadata": { "description": "Description of the analytic rule" }
     },
     "severity": {
@@ -31,7 +34,7 @@
   },
   "resources": [
     {
-      "type": "Microsoft.SecurityInsights/alertRules",
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
       "apiVersion": "2020-01-01",
       "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', variables('ruleName'))]",
       "kind": "Scheduled",
