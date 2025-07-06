@@ -1,70 +1,72 @@
-{
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "parameters": {
-    "workspaceName": {
-      "type": "string",
-      "defaultValue": "GoogleLab-Workspace",
-      "metadata": { "description": "Log Analytics workspace name" }
-    },
-    "displayName": {
-      "type": "string",
-      "defaultValue": "AWS CloudTrail IP Threat Intelligence Match",
-      "metadata": { "description": "Display name of the analytic rule" }
-    },
-    "description": {
-      "type": "string",
-      "defaultValue": "Detects AWS CloudTrail events where the source IP matches threat intelligence indicators.",
-      "metadata": { "description": "Description of the analytic rule" }
-    },
-    "severity": {
-      "type": "string",
-      "allowedValues": ["High", "Medium", "Low", "Informational"],
-      "defaultValue": "Medium",
-      "metadata": { "description": "Severity level of the analytic rule" }
-    },
-    "query": {
-      "type": "string",
-      "defaultValue": "let dt_lookBack = 1h; // Look back 1 hour for AWSCloudTrail logs\nlet ioc_lookBack = 14d; // Look back 14 days for threat intelligence indicators\nlet IP_Indicators = ThreatIntelligenceIndicator\n  | where TimeGenerated >= ago(ioc_lookBack)\n  | summarize LatestIndicatorTime = arg_max(TimeGenerated, *) by IndicatorId\n  | where Active == true and ExpirationDateTime > now()\n  | where isnotempty(NetworkIP) or isnotempty(EmailSourceIpAddress) or isnotempty(NetworkDestinationIP) or isnotempty(NetworkSourceIP)\n  | extend TI_ipEntity = iff(isnotempty(NetworkIP), NetworkIP, NetworkDestinationIP)\n  | extend TI_ipEntity = iff(isempty(TI_ipEntity) and isnotempty(NetworkSourceIP), NetworkSourceIP, TI_ipEntity)\n  | extend TI_ipEntity = iff(isempty(TI_ipEntity) and isnotempty(EmailSourceIpAddress), EmailSourceIpAddress, TI_ipEntity)\n  | where ipv4_is_private(TI_ipEntity) == false and  TI_ipEntity !startswith \"fe80\" and TI_ipEntity !startswith \"::\" and TI_ipEntity !startswith \"127.\";\nIP_Indicators\n  | join kind=innerunique (\n      AWSCloudTrail\n      | where TimeGenerated >= ago(1h)\n      | extend AWSCloudTrail_TimeGenerated = TimeGenerated\n    )\n    on $left.TI_ipEntity == $right.SourceIpAddress\n  | where AWSCloudTrail_TimeGenerated < ExpirationDateTime\n  | summarize AWSCloudTrail_TimeGenerated = arg_max(AWSCloudTrail_TimeGenerated, *) by IndicatorId, SourceIpAddress\n  | project AWSCloudTrail_TimeGenerated, Description, ActivityGroupNames, IndicatorId, ThreatType, Url, ExpirationDateTime, ConfidenceScore,\n    TI_ipEntity, EventName, EventTypeName, UserIdentityAccountId, UserIdentityUserName, Type\n  | extend timestamp = AWSCloudTrail_TimeGenerated",
-      "metadata": { "description": "KQL query for the analytic rule" }
-    }
-  },
-  "variables": {
-    "ruleName": "[guid(parameters('displayName'), parameters('workspaceName'))]",
-    "WorkspaceID": "[concat('/subscriptions/', subscription().subscriptionId,'/resourcegroups/', resourceGroup().name,'/providers/microsoft.operationalinsights/workspaces/',parameters('workspaceName'))]",    
-  },
-  "resources": [
+{  
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",  
+  "contentVersion": "1.0.0.0",  
+  "parameters": {  
+    "workspaceName": {  
+      "type": "string",  
+      "defaultValue": "GoogleLab-Workspace",  
+      "metadata": { "description": "Log Analytics workspace name" }  
+    },  
+    "displayName": {  
+      "type": "string",  
+      "defaultValue": "AWS CloudTrail IP Threat Intelligence Match",  
+      "metadata": { "description": "Display name of the analytic rule" }  
+    },  
+    "description": {  
+      "type": "string",  
+      "defaultValue": "Detects AWS CloudTrail events where the source IP matches threat intelligence indicators.",  
+      "metadata": { "description": "Description of the analytic rule" }  
+    },  
+    "severity": {  
+      "type": "string",  
+      "allowedValues": ["High", "Medium", "Low", "Informational"],  
+      "defaultValue": "Medium",  
+      "metadata": { "description": "Severity level of the analytic rule" }  
+    },  
+    "query": {  
+      "type": "string",  
+      "defaultValue": "let dt_lookBack = 1h; // Look back 1 hour for AWSCloudTrail logs\nlet ioc_lookBack = 14d; // Look back 14 days for threat intelligence indicators\nlet IP_Indicators = ThreatIntelligenceIndicator\n  | where TimeGenerated >= ago(ioc_lookBack)\n  | summarize LatestIndicatorTime = arg_max(TimeGenerated, *) by IndicatorId\n  | where Active == true and ExpirationDateTime > now()\n  | where isnotempty(NetworkIP) or isnotempty(EmailSourceIpAddress) or isnotempty(NetworkDestinationIP) or isnotempty(NetworkSourceIP)\n  | extend TI_ipEntity = iff(isnotempty(NetworkIP), NetworkIP, NetworkDestinationIP)\n  | extend TI_ipEntity = iff(isempty(TI_ipEntity) and isnotempty(NetworkSourceIP), NetworkSourceIP, TI_ipEntity)\n  | extend TI_ipEntity = iff(isempty(TI_ipEntity) and isnotempty(EmailSourceIpAddress), EmailSourceIpAddress, TI_ipEntity)\n  | where ipv4_is_private(TI_ipEntity) == false and  TI_ipEntity !startswith \"fe80\" and TI_ipEntity !startswith \"::\" and TI_ipEntity !startswith \"127.\";\nIP_Indicators\n  | join kind=innerunique (\n      AWSCloudTrail\n      | where TimeGenerated >= ago(1h)\n      | extend AWSCloudTrail_TimeGenerated = TimeGenerated\n    )\n    on $left.TI_ipEntity == $right.SourceIpAddress\n  | where AWSCloudTrail_TimeGenerated < ExpirationDateTime\n  | summarize AWSCloudTrail_TimeGenerated = arg_max(AWSCloudTrail_TimeGenerated, *) by IndicatorId, SourceIpAddress\n  | project AWSCloudTrail_TimeGenerated, Description, ActivityGroupNames, IndicatorId, ThreatType, Url, ExpirationDateTime, ConfidenceScore,\n    TI_ipEntity, EventName, EventTypeName, UserIdentityAccountId, UserIdentityUserName, Type\n  | extend timestamp = AWSCloudTrail_TimeGenerated",  
+      "metadata": { "description": "KQL query for the analytic rule" }  
+    }  
+  },  
+  "variables": {  
+    "ruleName": "[guid(parameters('displayName'), parameters('workspaceName'))]",  
+    "WorkspaceID": "[concat('/subscriptions/', subscription().subscriptionId, '/resourcegroups/', resourceGroup().name, '/providers/microsoft.operationalinsights/workspaces/', parameters('workspaceName'))]"  
+  },  
+  "resources": [  
     {
-      "id": "[concat(variables('WorkspaceID'),add('/providers/Microsoft.SecurityInsights/alertRules/', variables('ruleName')))]",
-      "apiVersion": "2020-01-01",
-      "kind": "Scheduled",
-      "properties": {
-        "displayName": "[parameters('displayName')]",
-        "description": "[parameters('description')]",
-        "severity": "[parameters('severity')]",
-        "enabled": false,
-        "query": "[parameters('query')]",
-        "queryFrequency": "PT1H",
-        "queryPeriod": "P14D",
-        "triggerOperator": "GreaterThan",
-        "triggerThreshold": 0,
-        "suppressionDuration": "PT1H",
-        "suppressionEnabled": false,
-        "incidentConfiguration": {
-          "createIncident": true,
-          "groupingConfiguration": {
-            "enabled": false
-          }
-        },
-        "eventGroupingSettings": {
-          "aggregationKind": "SingleAlert"
-        },
-        "tactics": [
-          "Impact"
-        ],
-        "techniques": [],
-        "subTechniques": []
-      }
-    }
-  ]
+      "id": "[concat(variables('WorkspaceID'),add('/providers/Microsoft.SecurityInsights/alertRules/', variables('ruleName')))]",        
+      "type": "Microsoft.OperationalInsights/alertRules",  
+      "apiVersion": "2020-01-01",  
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', variables('ruleName'))]",  
+      "kind": "Scheduled",  
+      "properties": {  
+        "displayName": "[parameters('displayName')]",  
+        "description": "[parameters('description')]",  
+        "severity": "[parameters('severity')]",  
+        "enabled": false,  
+        "query": "[parameters('query')]",  
+        "queryFrequency": "PT1H",  
+        "queryPeriod": "P14D",  
+        "triggerOperator": "GreaterThan",  
+        "triggerThreshold": 0,  
+        "suppressionDuration": "PT1H",  
+        "suppressionEnabled": false,  
+        "incidentConfiguration": {  
+          "createIncident": true,  
+          "groupingConfiguration": {  
+            "enabled": false  
+          }  
+        },  
+        "eventGroupingSettings": {  
+          "aggregationKind": "SingleAlert"  
+        },  
+        "tactics": [  
+          "Impact"  
+        ],  
+        "techniques": [],  
+        "subTechniques": []  
+      }  
+    }  
+  ]  
 }  
