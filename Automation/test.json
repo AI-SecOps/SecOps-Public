@@ -36,7 +36,7 @@
   "resources": [  
     {
       "id": "[concat(variables('WorkspaceID'), '/providers/Microsoft.SecurityInsights/alertRules/', variables('ruleName'))]",  
-      "type": "Microsoft.OperationalInsights/alertRules",  
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",  
       "apiVersion": "2020-01-01",  
       "name": "[variables('ruleName')]",  
       "kind": "Scheduled",  
