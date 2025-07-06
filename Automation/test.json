@@ -30,13 +30,15 @@
     }
   },
   "variables": {
-    "ruleName": "[guid(parameters('displayName'), parameters('workspaceName'))]"
+    "ruleName": "[guid(parameters('displayName'), parameters('workspaceName'))]",
+    "WorkspaceID": "[concat('/subscriptions/', subscription().subscriptionId,'/resourcegroups/', resourceGroup().name,'/providers/microsoft.operationalinsights/workspaces/',parameters('workspaceName'))]",    
   },
   "resources": [
     {
-      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "id": "[concat(variables('WorkspaceID'),add('/providers/Microsoft.SecurityInsights/alertRules/', variables('ruleName')))]",
+      "name": "[parameters('workspaceName')]",    
+      "type": "Microsoft.SecurityInsights/alertRules",
       "apiVersion": "2020-01-01",
-      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', variables('ruleName'))]",
       "kind": "Scheduled",
       "properties": {
         "displayName": "[parameters('displayName')]",
