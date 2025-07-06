@@ -31,7 +31,7 @@
   "resources": [  
     {  
       "type": "Microsoft.OperationalInsights/workspaces/providers/huntingQueries",  
-      "apiVersion": "2022-12-01-preview",  
+      "apiVersion": "2023-09-01",  
       "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', parameters('huntingQueryName'))]",  
       "properties": {  
         "displayName": "[parameters('displayName')]",  
