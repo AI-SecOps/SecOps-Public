@@ -14,14 +14,6 @@
       "type": "string",  
       "defaultValue": "mi-hunter"  
     },  
-    "repoUrl": {  
-      "type": "string",  
-      "defaultValue": "https://github.com/AI-SecOps/ai-assistant"  
-    },  
-    "branch": {  
-      "type": "string",  
-      "defaultValue": "main"  
-    },  
     "openAiEndpoint": {  
       "type": "string",  
       "defaultValue": "https://mith-azopenai.openai.azure.com/"  
@@ -87,19 +79,6 @@
         "httpsOnly": true,  
         "clientAffinityEnabled": false,  
         "clientCertEnabled": false  
-      }  
-    },  
-    {  
-      "type": "Microsoft.Web/sites/sourcecontrols",  
-      "apiVersion": "2022-03-01",  
-      "name": "[concat(parameters('functionAppName'), '/web')]",  
-      "dependsOn": [  
-        "[resourceId('Microsoft.Web/sites', parameters('functionAppName'))]"  
-      ],  
-      "properties": {  
-        "repoUrl": "[parameters('repoUrl')]",  
-        "branch": "[parameters('branch')]",  
-        "isGitHubAction": true  
       }  
     }  
   ],  
