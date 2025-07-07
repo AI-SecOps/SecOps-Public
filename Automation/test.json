@@ -1,1 +1,113 @@
-.
+{  
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",  
+  "contentVersion": "1.0.0.0",  
+  "parameters": {  
+    "functionAppName": {  
+      "type": "string",  
+      "defaultValue": "ai-assistant"  
+    },  
+    "storageAccountName": {  
+      "type": "string",  
+      "defaultValue": "mithstorage"  
+    },  
+    "userAssignedIdentityName": {  
+      "type": "string",  
+      "defaultValue": "mi-hunter"  
+    },  
+    "repoUrl": {  
+      "type": "string",  
+      "defaultValue": "https://github.com/AI-SecOps/ai-assistant"  
+    },  
+    "branch": {  
+      "type": "string",  
+      "defaultValue": "main"  
+    },  
+    "openAiEndpoint": {  
+      "type": "string",  
+      "defaultValue": "https://mith-azopenai.openai.azure.com/"  
+    },  
+    "openAiDeployment": {  
+      "type": "string",  
+      "defaultValue": "gpt-4.1"  
+    },  
+    "openAiApiVersion": {  
+      "type": "string",  
+      "defaultValue": "2024-02-15-preview"  
+    }  
+  },  
+  "variables": {  
+    "location": "[resourceGroup().location]",  
+    "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]"  
+  },  
+  "resources": [  
+    {  
+      "type": "Microsoft.Web/serverfarms",  
+      "apiVersion": "2022-03-01",  
+      "name": "[concat(parameters('functionAppName'), '-asp')]",  
+      "location": "[variables('location')]",  
+      "sku": {  
+        "name": "Y1",  
+        "tier": "Dynamic"  
+      },  
+      "kind": "functionapp"  
+    },  
+    {  
+      "type": "Microsoft.Web/sites",  
+      "apiVersion": "2022-03-01",  
+      "name": "[parameters('functionAppName')]",  
+      "location": "[variables('location')]",  
+      "identity": {  
+        "type": "UserAssigned",  
+        "userAssignedIdentities": {  
+          "[variables('userAssignedIdentityId')]": {}  
+        }  
+      },  
+      "kind": "functionapp",  
+      "dependsOn": [  
+        "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]"  
+      ],  
+      "properties": {  
+        "siteConfig": {  
+          "appSettings": [  
+            {  
+              "name": "AzureWebJobsStorage",  
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2022-09-01').keys[0].value)]"  
+            },  
+            { "name": "FUNCTIONS_WORKER_RUNTIME", "value": "python" },  
+            { "name": "FUNCTIONS_EXTENSION_VERSION", "value": "~4" },  
+            { "name": "SCM_DO_BUILD_DURING_DEPLOYMENT", "value": "1" },  
+            { "name": "ENABLE_ORYX_BUILD", "value": "true" },  
+            { "name": "WEBSITE_RUN_FROM_PACKAGE", "value": "" },  
+            { "name": "AZURE_OPENAI_ENDPOINT", "value": "[parameters('openAiEndpoint')]" },  
+            { "name": "AZURE_OPENAI_DEPLOYMENT", "value": "[parameters('openAiDeployment')]" },  
+            { "name": "AZURE_OPENAI_API_VERSION", "value": "[parameters('openAiApiVersion')]" }  
+          ]  
+        },  
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]",  
+        "httpsOnly": true,  
+        "clientAffinityEnabled": false,  
+        "clientCertEnabled": false  
+      }  
+    },  
+    {  
+      "type": "Microsoft.Web/sites/sourcecontrols",  
+      "apiVersion": "2022-03-01",  
+      "name": "[concat(parameters('functionAppName'), '/web')]",  
+      "dependsOn": [  
+        "[resourceId('Microsoft.Web/sites', parameters('functionAppName'))]"  
+      ],  
+      "properties": {  
+        "repoUrl": "[parameters('repoUrl')]",  
+        "branch": "[parameters('branch')]",  
+        "isManualIntegration": true,  
+        "isGitHubAction": true  
+      }  
+    }  
+  ],  
+  "outputs": {  
+    "functionAppUrl": {  
+      "type": "string",  
+      "value": "[reference(resourceId('Microsoft.Web/sites', parameters('functionAppName'))).defaultHostName]"  
+    }  
+  }  
+}  
