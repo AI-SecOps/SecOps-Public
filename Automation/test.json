@@ -41,7 +41,10 @@
         "name": "Y1",  
         "tier": "Dynamic"  
       },  
-      "kind": "functionapp"  
+      "kind": "functionapp,linux",  
+      "properties": {  
+        "reserved": true  
+      }  
     },  
     {  
       "type": "Microsoft.Web/sites",  
@@ -54,12 +57,13 @@
           "[variables('userAssignedIdentityId')]": {}  
         }  
       },  
-      "kind": "functionapp",  
+      "kind": "functionapp,linux",  
       "dependsOn": [  
         "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]"  
       ],  
       "properties": {  
         "siteConfig": {  
+          "linuxFxVersion": "Python|3.11",  // Change to your desired Python version  
           "appSettings": [  
             {  
               "name": "AzureWebJobsStorage",  
