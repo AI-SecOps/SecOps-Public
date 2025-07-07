@@ -35,16 +35,13 @@
     {  
       "type": "Microsoft.Web/serverfarms",  
       "apiVersion": "2022-03-01",  
-      "name": "[concat(parameters('functionAppName'), '-asp')]",  
+      "name": "[concat(parameters('functionAppName'), '-flex-asp')]",  
       "location": "[variables('location')]",  
       "sku": {  
-        "name": "Y1",  
-        "tier": "Dynamic"  
+        "name": "FC1",  
+        "tier": "FlexConsumption"  
       },  
-      "kind": "functionapp,linux",  
-      "properties": {  
-        "reserved": true  
-      }  
+      "kind": "functionapp"  
     },  
     {  
       "type": "Microsoft.Web/sites",  
@@ -57,13 +54,13 @@
           "[variables('userAssignedIdentityId')]": {}  
         }  
       },  
-      "kind": "functionapp,linux",  
+      "kind": "functionapp",  
       "dependsOn": [  
-        "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]"  
+        "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-flex-asp'))]"  
       ],  
       "properties": {  
         "siteConfig": {  
-          "linuxFxVersion": "Python|3.11",  // Change to your desired Python version  
+          "linuxFxVersion": "Python|3.11",  
           "appSettings": [  
             {  
               "name": "AzureWebJobsStorage",  
@@ -79,7 +76,7 @@
             { "name": "AZURE_OPENAI_API_VERSION", "value": "[parameters('openAiApiVersion')]" }  
           ]  
         },  
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]",  
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-flex-asp'))]",  
         "httpsOnly": true,  
         "clientAffinityEnabled": false,  
         "clientCertEnabled": false  
