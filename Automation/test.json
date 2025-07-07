@@ -99,7 +99,6 @@
       "properties": {  
         "repoUrl": "[parameters('repoUrl')]",  
         "branch": "[parameters('branch')]",  
-        "isManualIntegration": true,  
         "isGitHubAction": true  
       }  
     }  
