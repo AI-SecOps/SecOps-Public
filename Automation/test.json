@@ -6,13 +6,17 @@
       "type": "string",  
       "defaultValue": "ai-assistant"  
     },  
-    "storageAccountName": {  
+    "location": {  
       "type": "string",  
-      "defaultValue": "mithstorage"  
+      "defaultValue": "East US"  
+    },  
+    "NewStorageAccountName": {  
+      "type": "string",  
+      "defaultValue": "aifunctionstor"  
     },  
     "userAssignedIdentityName": {  
       "type": "string",  
-      "defaultValue": "mi-hunter"  
+      "defaultValue": "AzOpenAI_MI"  
     },  
     "openAiEndpoint": {  
       "type": "string",  
@@ -28,20 +32,44 @@
     }  
   },  
   "variables": {  
-    "location": "[resourceGroup().location]",  
-    "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]"  
+    "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",  
+    "serverFarm_externalId": "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]",  
+    "storageAccountId": "[resourceId('Microsoft.Storage/storageAccounts', parameters('NewStorageAccountName'))]"  
   },  
   "resources": [  
+    {  
+      "type": "Microsoft.Storage/storageAccounts",  
+      "apiVersion": "2022-05-01",  
+      "name": "[parameters('NewStorageAccountName')]",  
+      "location": "[parameters('location')]",  
+      "sku": {  
+        "name": "Standard_LRS"  
+      },  
+      "kind": "StorageV2",  
+      "properties": {  
+        "accessTier": "Hot",  
+        "supportsHttpsTrafficOnly": true,  
+        "minimumTlsVersion": "TLS1_2",  
+        "allowBlobPublicAccess": false,  
+        "publicNetworkAccess": "Enabled"  
+      }  
+    },  
+    {  
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",  
+      "apiVersion": "2023-01-31",  
+      "name": "[parameters('userAssignedIdentityName')]",  
+      "location": "[parameters('location')]"  
+    },  
     {  
       "type": "Microsoft.Web/serverfarms",  
       "apiVersion": "2022-03-01",  
       "name": "[concat(parameters('functionAppName'), '-asp')]",  
-      "location": "[variables('location')]",  
+      "location": "[parameters('location')]",  
+      "kind": "linux",  
       "sku": {  
-        "name": "Y1",  
-        "tier": "Dynamic"  
+        "Tier": "Dynamic",  
+        "Name": "Y1"  
       },  
-      "kind": "functionapp,linux",  
       "properties": {  
         "reserved": true  
       }  
@@ -50,44 +78,69 @@
       "type": "Microsoft.Web/sites",  
       "apiVersion": "2022-03-01",  
       "name": "[parameters('functionAppName')]",  
-      "location": "[variables('location')]",  
+      "location": "[parameters('location')]",  
+      "kind": "functionapp,linux",  
       "identity": {  
         "type": "UserAssigned",  
         "userAssignedIdentities": {  
           "[variables('userAssignedIdentityId')]": {}  
         }  
       },  
-      "kind": "functionapp,linux",  
       "dependsOn": [  
-        "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]"  
+        "[variables('serverFarm_externalId')]",  
+        "[variables('storageAccountId')]",  
+        "[variables('userAssignedIdentityId')]"  
       ],  
       "properties": {  
+        "serverFarmId": "[variables('serverFarm_externalId')]",  
         "siteConfig": {  
-          "linuxFxVersion": "Python|3.11",  // change to your desired Python version  
+          "linuxFxVersion": "Python|3.12",  
           "appSettings": [  
             {  
               "name": "AzureWebJobsStorage",  
-              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2022-09-01').keys[0].value)]"  
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('NewStorageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('NewStorageAccountName')), '2022-05-01').keys[0].value)]"  
             },  
-            { "name": "FUNCTIONS_WORKER_RUNTIME", "value": "python" },  
-            { "name": "FUNCTIONS_EXTENSION_VERSION", "value": "~4" },  
-            { "name": "SCM_DO_BUILD_DURING_DEPLOYMENT", "value": "1" },  
-            { "name": "ENABLE_ORYX_BUILD", "value": "true" },  
-            { "name": "WEBSITE_RUN_FROM_PACKAGE", "value": "" },  
-            { "name": "AZURE_OPENAI_ENDPOINT", "value": "[parameters('openAiEndpoint')]" },  
-            { "name": "AZURE_OPENAI_DEPLOYMENT", "value": "[parameters('openAiDeployment')]" },  
-            { "name": "AZURE_OPENAI_API_VERSION", "value": "[parameters('openAiApiVersion')]" }  
+            {  
+              "name": "FUNCTIONS_WORKER_RUNTIME",  
+              "value": "python"  
+            },  
+            {  
+              "name": "WEBSITE_RUN_FROM_PACKAGE",  
+              "value": "1"  
+            },  
+            {  
+              "name": "OPENAI_ENDPOINT",  
+              "value": "[parameters('openAiEndpoint')]"  
+            },  
+            {  
+              "name": "OPENAI_DEPLOYMENT",  
+              "value": "[parameters('openAiDeployment')]"  
+            },  
+            {  
+              "name": "OPENAI_API_VERSION",  
+              "value": "[parameters('openAiApiVersion')]"  
+            },  
+            {  
+              "name": "AzureWebJobsStorage__credential",  
+              "value": "managedidentity"  
+            },  
+            {  
+              "name": "AzureWebJobsStorage__blobServiceUri",  
+              "value": "[concat('https://', parameters('NewStorageAccountName'), '.blob.core.windows.net')]"  
+            },  
+            {  
+              "name": "AzureWebJobsStorage__queueServiceUri",  
+              "value": "[concat('https://', parameters('NewStorageAccountName'), '.queue.core.windows.net')]"  
+            },  
+            {  
+              "name": "AzureWebJobsStorage__tableServiceUri",  
+              "value": "[concat('https://', parameters('NewStorageAccountName'), '.table.core.windows.net')]"  
+            }  
+            // Add more app settings as needed  
           ]  
         },  
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]",  
         "httpsOnly": true  
       }  
     }  
-  ],  
-  "outputs": {  
-    "functionAppUrl": {  
-      "type": "string",  
-      "value": "[reference(resourceId('Microsoft.Web/sites', parameters('functionAppName'))).defaultHostName]"  
-    }  
-  }  
+  ]  
 }  
