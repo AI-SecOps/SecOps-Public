@@ -1,146 +1,225 @@
-{  
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",  
-  "contentVersion": "1.0.0.0",  
-  "parameters": {  
-    "functionAppName": {  
-      "type": "string",  
-      "defaultValue": "ai-assistant"  
-    },  
-    "location": {  
-      "type": "string",  
-      "defaultValue": "East US"  
-    },  
-    "NewStorageAccountName": {  
-      "type": "string",  
-      "defaultValue": "aifunctionstor"  
-    },  
-    "userAssignedIdentityName": {  
-      "type": "string",  
-      "defaultValue": "AzOpenAI_MI"  
-    },  
-    "openAiEndpoint": {  
-      "type": "string",  
-      "defaultValue": "https://mith-azopenai.openai.azure.com/"  
-    },  
-    "openAiDeployment": {  
-      "type": "string",  
-      "defaultValue": "gpt-4.1"  
-    },  
-    "openAiApiVersion": {  
-      "type": "string",  
-      "defaultValue": "2024-02-15-preview"  
-    }  
-  },  
-  "variables": {  
-    "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",  
-    "serverFarm_externalId": "[resourceId('Microsoft.Web/serverfarms', concat(parameters('functionAppName'), '-asp'))]",  
-    "storageAccountId": "[resourceId('Microsoft.Storage/storageAccounts', parameters('NewStorageAccountName'))]"  
-  },  
-  "resources": [  
-    {  
-      "type": "Microsoft.Storage/storageAccounts",  
-      "apiVersion": "2022-05-01",  
-      "name": "[parameters('NewStorageAccountName')]",  
-      "location": "[parameters('location')]",  
-      "sku": {  
-        "name": "Standard_LRS"  
-      },  
-      "kind": "StorageV2",  
-      "properties": {  
-        "accessTier": "Hot",  
-        "supportsHttpsTrafficOnly": true,  
-        "minimumTlsVersion": "TLS1_2",  
-        "allowBlobPublicAccess": false,  
-        "publicNetworkAccess": "Enabled"  
-      }  
-    },  
-    {  
-      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",  
-      "apiVersion": "2023-01-31",  
-      "name": "[parameters('userAssignedIdentityName')]",  
-      "location": "[parameters('location')]"  
-    },  
-    {  
-      "type": "Microsoft.Web/serverfarms",  
-      "apiVersion": "2022-03-01",  
-      "name": "[concat(parameters('functionAppName'), '-asp')]",  
-      "location": "[parameters('location')]",  
-      "kind": "linux",  
-      "sku": {  
-        "Tier": "Dynamic",  
-        "Name": "Y1"  
-      },  
-      "properties": {  
-        "reserved": true  
-      }  
-    },  
-    {  
-      "type": "Microsoft.Web/sites",  
-      "apiVersion": "2022-03-01",  
-      "name": "[parameters('functionAppName')]",  
-      "location": "[parameters('location')]",  
-      "kind": "functionapp,linux",  
-      "identity": {  
-        "type": "UserAssigned",  
-        "userAssignedIdentities": {  
-          "[variables('userAssignedIdentityId')]": {}  
-        }  
-      },  
-      "dependsOn": [  
-        "[variables('serverFarm_externalId')]",  
-        "[variables('storageAccountId')]",  
-        "[variables('userAssignedIdentityId')]"  
-      ],  
-      "properties": {  
-        "serverFarmId": "[variables('serverFarm_externalId')]",  
-        "siteConfig": {  
-          "linuxFxVersion": "Python|3.12",  
-          "appSettings": [  
-            {  
-              "name": "AzureWebJobsStorage",  
-              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('NewStorageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('NewStorageAccountName')), '2022-05-01').keys[0].value)]"  
-            },  
-            {  
-              "name": "FUNCTIONS_WORKER_RUNTIME",  
-              "value": "python"  
-            },  
-            {  
-              "name": "WEBSITE_RUN_FROM_PACKAGE",  
-              "value": "1"  
-            },  
-            {  
-              "name": "OPENAI_ENDPOINT",  
-              "value": "[parameters('openAiEndpoint')]"  
-            },  
-            {  
-              "name": "OPENAI_DEPLOYMENT",  
-              "value": "[parameters('openAiDeployment')]"  
-            },  
-            {  
-              "name": "OPENAI_API_VERSION",  
-              "value": "[parameters('openAiApiVersion')]"  
-            },  
-            {  
-              "name": "AzureWebJobsStorage__credential",  
-              "value": "managedidentity"  
-            },  
-            {  
-              "name": "AzureWebJobsStorage__blobServiceUri",  
-              "value": "[concat('https://', parameters('NewStorageAccountName'), '.blob.core.windows.net')]"  
-            },  
-            {  
-              "name": "AzureWebJobsStorage__queueServiceUri",  
-              "value": "[concat('https://', parameters('NewStorageAccountName'), '.queue.core.windows.net')]"  
-            },  
-            {  
-              "name": "AzureWebJobsStorage__tableServiceUri",  
-              "value": "[concat('https://', parameters('NewStorageAccountName'), '.table.core.windows.net')]"  
-            }  
-            // Add more app settings as needed  
-          ]  
-        },  
-        "httpsOnly": true  
-      }  
-    }  
-  ]  
-}  
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "subscriptionId": {
+            "type": "String"
+        },
+        "name": {
+            "type": "String"
+        },
+        "location": {
+            "type": "String"
+        },
+        "storageBlobContainerName": {
+            "type": "String"
+        },
+        "autoGeneratedDomainNameLabelScope": {
+            "type": "String"
+        },
+        "storageAccountName": {
+            "type": "String"
+        },
+        "sku": {
+            "type": "String"
+        },
+        "skuCode": {
+            "type": "String"
+        },
+        "workerSize": {
+            "type": "String"
+        },
+        "workerSizeId": {
+            "type": "String"
+        },
+        "numberOfWorkers": {
+            "type": "String"
+        },
+        "hostingPlanName": {
+            "type": "String"
+        },
+        "serverFarmResourceGroup": {
+            "type": "String"
+        },
+        "alwaysOn": {
+            "type": "Bool"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Web/sites",
+            "apiVersion": "2022-03-01",
+            "name": "[parameters('name')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Web/serverfarms/', parameters('hostingPlanName'))]",
+                "[concat('Microsoft.Storage/storageAccounts/', parameters('storageAccountName'))]"
+            ],
+            "tags": {},
+            "kind": "functionapp,linux",
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                    "/subscriptions/d73b9dc7-c78b-404d-a154-8e2593d9bd33/resourcegroups/rgAutomation/providers/Microsoft.ManagedIdentity/userAssignedIdentities/AzOpenAI_MI": {}
+                }
+            },
+            "properties": {
+                "name": "[parameters('name')]",
+                "siteConfig": {
+                    "appSettings": [
+                        {
+                            "name": "AzureWebJobsStorage__credential",
+                            "value": "managedidentity"
+                        },
+                        {
+                            "name": "AzureWebJobsStorage__blobServiceUri",
+                            "value": "[concat('https://', parameters('storageAccountName'), '.blob.core.windows.net')]"
+                        },
+                        {
+                            "name": "AzureWebJobsStorage__queueServiceUri",
+                            "value": "[concat('https://', parameters('storageAccountName'), '.queue.core.windows.net')]"
+                        },
+                        {
+                            "name": "AzureWebJobsStorage__tableServiceUri",
+                            "value": "[concat('https://', parameters('storageAccountName'), '.table.core.windows.net')]"
+                        },
+                        {
+                            "name": "AzureWebJobsStorage__clientId",
+                            "value": "a653837a-c9e3-4b68-b46e-f364b88ff2a9"
+                        }
+                    ],
+                    "cors": {
+                        "allowedOrigins": [
+                            "https://portal.azure.com"
+                        ]
+                    }
+                },
+                "clientAffinityEnabled": false,
+                "virtualNetworkSubnetId": null,
+                "autoGeneratedDomainNameLabelScope": "[parameters('autoGeneratedDomainNameLabelScope')]",
+                "functionAppConfig": {
+                    "deployment": {
+                        "storage": {
+                            "type": "blobContainer",
+                            "value": "[concat('https://', parameters('storageAccountName'), '.blob.', 'core.windows.net', '/', parameters('storageBlobContainerName'))]",
+                            "authentication": {
+                                "type": "UserAssignedIdentity",
+                                "userAssignedIdentityResourceId": "/subscriptions/d73b9dc7-c78b-404d-a154-8e2593d9bd33/resourcegroups/rgAutomation/providers/Microsoft.ManagedIdentity/userAssignedIdentities/AzOpenAI_MI"
+                            }
+                        }
+                    },
+                    "scaleAndConcurrency": {
+                        "maximumInstanceCount": 100,
+                        "instanceMemoryMB": 4096
+                    },
+                    "runtime": {
+                        "name": "python",
+                        "version": "3.12"
+                    }
+                },
+                "publicNetworkAccess": "Enabled",
+                "httpsOnly": true,
+                "serverFarmId": "[concat('/subscriptions/', parameters('subscriptionId'),'/resourcegroups/', parameters('serverFarmResourceGroup'), '/providers/Microsoft.Web/serverfarms/', parameters('hostingPlanName'))]"
+            },
+            "resources": [
+                {
+                    "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+                    "apiVersion": "2022-09-01",
+                    "name": "[concat(parameters('name'), '/scm')]",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+                    ],
+                    "properties": {
+                        "allow": false
+                    }
+                },
+                {
+                    "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+                    "apiVersion": "2022-09-01",
+                    "name": "[concat(parameters('name'), '/ftp')]",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+                    ],
+                    "properties": {
+                        "allow": false
+                    }
+                }
+            ]
+        },
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2018-11-01",
+            "name": "[parameters('hostingPlanName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [],
+            "tags": {},
+            "sku": {
+                "Tier": "[parameters('sku')]",
+                "Name": "[parameters('skuCode')]"
+            },
+            "kind": "linux",
+            "properties": {
+                "name": "[parameters('hostingPlanName')]",
+                "workerSize": "[parameters('workerSize')]",
+                "workerSizeId": "[parameters('workerSizeId')]",
+                "numberOfWorkers": "[parameters('numberOfWorkers')]",
+                "reserved": true,
+                "zoneRedundant": false
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2022-05-01",
+            "name": "[parameters('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [],
+            "tags": {},
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "properties": {
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2",
+                "defaultToOAuthAuthentication": true,
+                "allowBlobPublicAccess": false,
+                "publicNetworkAccess": "Enabled"
+            }
+        },
+        {
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2021-04-01",
+            "name": "StorageBlobContainerTemplate",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.1",
+                    "parameters": {},
+                    "variables": {},
+                    "resources": [
+                        {
+                            "name": "[concat(parameters('storageAccountName'), '/default')]",
+                            "type": "Microsoft.Storage/storageAccounts/blobServices",
+                            "apiVersion": "2022-05-01",
+                            "dependsOn": []
+                        },
+                        {
+                            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+                            "apiVersion": "2022-05-01",
+                            "name": "[concat(parameters('storageAccountName'), '/default/', parameters('storageBlobContainerName'))]",
+                            "dependsOn": [
+                                "[resourceId('rgAutomation','Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+                            ]
+                        }
+                    ]
+                }
+            },
+            "subscriptionId": "[parameters('subscriptionId')]",
+            "resourceGroup": "rgAutomation"
+        }
+    ]
+}
