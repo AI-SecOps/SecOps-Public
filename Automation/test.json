@@ -260,7 +260,7 @@
                       },  
                       "runtimeConfiguration": {  
                         "contentTransfer": {  
-                          "transferMode": " "Chunked""  
+                          "transferMode": "Chunked"
                         }  
                       }  
                     },  
