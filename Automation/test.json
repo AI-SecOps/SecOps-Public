@@ -1,481 +1,497 @@
-{
-    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-    "contentVersion": "1.0.0.0",
-    "parameters": {
-        "LogicAppName": {
-            "defaultValue": "Block_FileHash_on_Endpoint",
-            "type": "String"
-        },
-        "userAssignedIdentityName": {
-            "defaultValue": "POCs_MI",
-            "type": "String",
-            "metadata": {
-                "description": "This is the User Assigned Managed Identity with 'Priviledge User Administrator', 'Log Analytic Reader', and 'Sentinel Contributor' Roles assigned to it. This identity will be used to reset the password and revoke the sign-in sessions of the user accounts linked to the incident."
-            }
-        },
-        "AzureSentinelAPI": {
-            "defaultValue": "azuresentinel-3",
-            "type": "String",
-            "metadata": {
-                "description": "This is the working Azure Sentinel API for Entity trigger and posting comments.",
-                "displayName": "Azure Sentinel API"
-            }
-        },
-        "LogAnalyticsAPI": {
-            "defaultValue": "azuremonitorlogs",
-            "type": "String",
-            "metadata": {
-                "description": "This is the working Azure Monitor Logs API for querying log data.",
-                "displayName": "Azure Monitor Logs API"
-            }
-        },
-        "LogAnalyticsWorkspaceName": {
-            "defaultValue": "GoogleLab-Workspace",
-            "type": "String",
-            "metadata": {
-                "description": "This is the log analytics workspace name where the Sentinel data is stored.",
-                "displayName": "Log Analytics Workspace Name"
-            }
-        },
-        "notificationEmailRecipients": {
-            "defaultValue": "test@example.com",
-            "type": "String",
-            "metadata": {
-                "description": "Comma-separated list of email addresses to notify when the incident is created."
-            }
-        }
-    },
-    "variables": {
-        "resourceGroupLocation": "[resourceGroup().location]",
-        "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",
-        "logAnalyticsID": "[concat('/subscriptions/', subscription().subscriptionId,'/resourcegroups/', resourceGroup().name,'/providers/microsoft.operationalinsights/workspaces/',parameters('LogAnalyticsWorkspaceName'))]",
-        "connections_azuresentinel_externalid": "[resourceId('Microsoft.Web/connections/', parameters('AzureSentinelAPI'))]",
-        "connections_azuremonitorlogs_externalid": "[resourceId('Microsoft.Web/connections/', parameters('LogAnalyticsAPI'))]",
-        "connections_teams_externalid": "[resourceId('Microsoft.Web/connections/', 'teams')]",
-        "connections_office365_externalid": "[resourceId('Microsoft.Web/connections/', 'office365')]"
-    },
-    "resources": [
-        {
-            "type": "Microsoft.Logic/workflows",
-            "apiVersion": "2017-07-01",
-            "name": "[parameters('LogicAppName')]",
-            "location": "[resourceGroup().location]",
-            "identity": {
-                "type": "UserAssigned",
-                "userAssignedIdentities": {
-                    "[variables('userAssignedIdentityId')]": {}
-                }
-            },
-            "properties": {
-                "state": "Enabled",
-                "definition": {
-                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-                    "contentVersion": "1.0.0.0",
-                    "parameters": {
-                        "NotificationRecipients": {
-                            "defaultValue": "[parameters('notificationEmailRecipients')]",
-                            "type": "String"
-                        },
-                        "$connections": {
-                            "defaultValue": {},
-                            "type": "Object"
-                        }
-                    },
-                    "triggers": {
-                        "Microsoft_Sentinel_entity": {
-                            "type": "ApiConnectionWebhook",
-                            "inputs": {
-                                "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                    }
-                                },
-                                "body": {
-                                    "callback_url": "@listCallbackUrl()"
-                                },
-                                "path": "/entity/@{encodeURIComponent('FileHash')}"
-                            }
-                        }
-                    },
-                    "actions": {
-                        "Get_Indicators_List": {
-                            "runAfter": {
-                                "Incident_ARM_ID": [
-                                    "Succeeded"
-                                ],
-                                "Entity": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Http",
-                            "inputs": {
-                                "uri": "https://api.securitycenter.microsoft.com/api/indicators",
-                                "method": "GET",
-                                "authentication": {
-                                    "type": "ManagedServiceIdentity",
-                                    "identity": "[variables('userAssignedIdentityId')]",
-                                    "audience": "https://api.securitycenter.windows.com"
-                                }
-                            },
-                            "operationOptions": "DisableAutomaticDecompression",
-                            "runtimeConfiguration": {
-                                "paginationPolicy": {
-                                    "minimumItemCount": 30000
-                                }
-                            }
-                        },
-                        "New_Indicator": {
-                            "actions": {
-                                "Get_Info_FileHash_from_Alert": {
-                                    "type": "ApiConnection",
-                                    "inputs": {
-                                        "host": {
-                                            "connection": {
-                                                "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"
-                                            }
-                                        },
-                                        "method": "post",
-                                        "body": {
-                                            "query": "let SuspiciousSHA256 = '@{outputs('Entity')}';\nlet SecAlerts=materialize(SecurityAlert\n| where StartTime > ago(7d)\n| where Entities has SuspiciousSHA256\n| summarize arg_max(TimeGenerated, AlertName, Entities) by SystemAlertId);\nlet ProcessEntity = SecAlerts\n | mv-expand todynamic(Entities)\n | where Entities.Type has 'process'\n | where Entities has SuspiciousSHA256\n | extend CommandLine = tostring(Entities.CommandLine), ProcessDirectory = tostring(Entities.ImageFile.Directory), ProcessFileName = tostring(Entities.ImageFile.Name), ProcessSHA256 = tostring(extract_all(@'SHA256\",\"Value\":\"(.*?[^\\\"]+)\"', tostring(Entities)))\n | project SystemAlertId, CommandLine, ProcessDirectory, ProcessFileName, ProcessSHA256;\nlet FileEntity = SecAlerts\n | mv-expand todynamic(Entities)\n | where Entities.Type has 'file'\n | where Entities has SuspiciousSHA256\n | extend Directory=tostring(coalesce(Entities.Directory,Entities.ImageFile.Directory, Entities.ParentProcess.ImageFile.Directory)), FileName=tostring(coalesce(Entities.Name, Entities.ImageFile.Name, Entities.ParentProcess.ImageFile.Name)), SHA256 = tostring(extract_all(@'SHA256\",\"Value\":\"(.*?[^\\\"]+)\"', tostring(Entities)))\n | project SystemAlertId, Directory, FileName, SHA256;\nSecAlerts\n| lookup kind=leftouter (ProcessEntity) on SystemAlertId\n| lookup kind=leftouter (FileEntity) on SystemAlertId\n| where ProcessSHA256 has SuspiciousSHA256 or SHA256 has SuspiciousSHA256\n| mv-expand todynamic(ProcessSHA256), todynamic(SHA256)\n| distinct ProcessDirectory, ProcessFileName, tostring(ProcessSHA256), Directory, FileName, tostring(SHA256)\n| project Directory=coalesce(ProcessDirectory,Directory), FileName=coalesce(ProcessFileName,FileName), SHA256=coalesce(ProcessSHA256,SHA256)",
-                                            "timerangetype": "2",
-                                            "timerange": {
-                                                "relativeTimeRange": "Last 7 days"
-                                            }
-                                        },
-                                        "path": "/queryDataV2",
-                                        "queries": {
-                                            "subscriptions": "[subscription().subscriptionId]",
-                                            "resourcegroups": "[resourceGroup().name]",
-                                            "resourcetype": "Log Analytics Workspace",
-                                            "resourcename": "[parameters('LogAnalyticsWorkspaceName')]"
-                                        }
-                                    }
-                                },
-                                "Post_adaptive_card_and_wait_for_a_response": {
-                                    "runAfter": {
-                                        "Get_Info_FileHash_from_Alert": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "type": "ApiConnectionWebhook",
-                                    "inputs": {
-                                        "host": {
-                                            "connection": {
-                                                "name": "@parameters('$connections')['teams']['connectionId']"
-                                            }
-                                        },
-                                        "body": {
-                                            "notificationUrl": "@listCallbackUrl()",
-                                            "body": {
-                                                "messageBody": "{\n  \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\n  \"version\": \"1.2\",\n  \"type\": \"AdaptiveCard\",\n  \"body\": [\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"IOC Blocking Approval Request - SHA256 Filehash\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"Please review the IOC for blocking below and provide decision .You may include additional comments as needed.\",\n      \"wrap\": true\n    },    \n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"Directory: @{body('Get_Info_FileHash_from_Alert')?['value']?['Directory']}\",\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"FileName: @{body('Get_Info_FileHash_from_Alert')?['value']?['FileName']}\",\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"FileHash: @{body('Get_Info_FileHash_from_Alert')?['value']?['SHA256']}\",\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"[View Related Incident](https://portal.azure.com/#view/Microsoft_Azure_Security_Insights/IncidentPage.ReactView/incidentArmId/@{encodeUriComponent(outputs('Incident_ARM_ID'))})\",\n      \"wrap\": true,\n      \"color\": \"Accent\",\n      \"spacing\": \"Medium\"\n    },\n    {\n      \"type\": \"Input.Text\",\n      \"id\": \"comment\",\n      \"placeholder\": \"Enter your comment here...\",\n      \"isMultiline\": true\n    }\n  ],\n  \"actions\": [\n    {\n      \"type\": \"Action.Submit\",\n      \"title\": \"Approve\",\n      \"data\": {\n        \"approvalResponse\": \"approved\"\n      }\n    },\n    {\n      \"type\": \"Action.Submit\",\n      \"title\": \"Reject\",\n      \"data\": {\n        \"approvalResponse\": \"rejected\"\n      }\n    }\n  ]\n}",
-                                                "updateMessage": "Thanks for your response!",
-                                                "recipient": {
-                                                    "groupId": "xxxxxxxxxxxx",
-                                                    "channelId": "19:xxxxxxxxxxxx@@thread.tacv2"
-                                                }
-                                            }
-                                        },
-                                        "path": "/v1.0/teams/conversation/gatherinput/poster/Flow bot/location/@{encodeURIComponent('Channel')}/$subscriptions"
-                                    }
-                                },
-                                "Is_Approved": {
-                                    "actions": {
-                                        "Add_comment_to_incident_(V3)": {
-                                            "runAfter": {
-                                                "Compose_Comments": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "ApiConnection",
-                                            "inputs": {
-                                                "host": {
-                                                    "connection": {
-                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                                    }
-                                                },
-                                                "method": "post",
-                                                "body": {
-                                                    "incidentArmId": "@triggerBody()?['IncidentArmID']",
-                                                    "message": "<p class=\"editor-paragraph\">@{outputs('Compose_Comments')}</p>"
-                                                },
-                                                "path": "/Incidents/Comment"
-                                            }
-                                        },
-                                        "Send_an_email_-_approved": {
-                                            "runAfter": {
-                                                "Add_comment_to_incident_(V3)": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "ApiConnection",
-                                            "inputs": {
-                                                "host": {
-                                                    "connection": {
-                                                        "name": "@parameters('$connections')['office365']['connectionId']"
-                                                    }
-                                                },
-                                                "method": "post",
-                                                "body": {
-                                                    "To": "@parameters('NotificationRecipients')",
-                                                    "Subject": "IOC Blocking Approved by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']} |  @{body('Get_Info_FileHash_from_Alert')?['value']?['FileName']}",
-                                                    "Body": "<p class=\"editor-paragraph\">The below file has been <b><strong class=\"editor-text-bold\">added </strong></b>to <b><strong class=\"editor-text-bold\">MDE Indicator list</strong></b> with the action set to <b><strong class=\"editor-text-bold\">block</strong></b>.<br><br>FileHash: @{body('Get_Info_FileHash_from_Alert')?['value']?['SHA256']}<br>FileName: @{body('Get_Info_FileHash_from_Alert')?['value']?['FileName']}<br>FolderPath: @{body('Get_Info_FileHash_from_Alert')?['value']?['Directory']}<br><br><br>IncidentNumber: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}<br>Requested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}<br>===================<br>Approved by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}<br>Approver Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}</p>"
-                                                },
-                                                "path": "/v2/Mail"
-                                            }
-                                        },
-                                        "HTTP_-_SHA256_-_block": {
-                                            "type": "Http",
-                                            "inputs": {
-                                                "uri": "https://api.securitycenter.microsoft.com/api/indicators",
-                                                "method": "POST",
-                                                "body": {
-                                                    "indicatorValue": "@{body('Get_Info_FileHash_from_Alert')?['value']?['SHA256']}",
-                                                    "indicatorType": "FileSha256",
-                                                    "title": "Playbook - Incident @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} - @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']} ",
-                                                    "application": "[parameters('LogicAppName')]",
-                                                    "expirationTime": "@addDays(utcNow(), 30)",
-                                                    "action": "Block",
-                                                    "severity": "Medium",
-                                                    "description": "Approved by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}, Comment: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}",
-                                                    "recommendedActions": "Approved",
-                                                    "GenerateAlert": "True"
-                                                },
-                                                "authentication": {
-                                                    "type": "ManagedServiceIdentity",
-                                                    "identity": "[variables('userAssignedIdentityId')]",
-                                                    "audience": "https://api.securitycenter.windows.com"
-                                                }
-                                            },
-                                            "runtimeConfiguration": {
-                                                "contentTransfer": {
-                                                    "transferMode": "Chunked"
-                                                }
-                                            }
-                                        },
-                                        "Compose_Comments": {
-                                            "runAfter": {
-                                                "HTTP_-_SHA256_-_block": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "Compose",
-                                            "inputs": "The below file has been added to MDE Indicator list with the action set to block.\n\nFileHash: @{body('Get_Info_FileHash_from_Alert')?['value']?['SHA256']}\nFileName: @{body('Get_Info_FileHash_from_Alert')?['value']?['FileName']}\nFolderPath: @{body('Get_Info_FileHash_from_Alert')?['value']?['Directory']}\n\n\nIncidentNumber: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}\nRequested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}\n===================\nApproved by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}\nApprover Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}"
-                                        }
-                                    },
-                                    "runAfter": {
-                                        "Get_InitiatedBy": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "else": {
-                                        "actions": {
-                                            "Send_an_email_-_denied": {
-                                                "type": "ApiConnection",
-                                                "inputs": {
-                                                    "host": {
-                                                        "connection": {
-                                                            "name": "@parameters('$connections')['office365']['connectionId']"
-                                                        }
-                                                    },
-                                                    "method": "post",
-                                                    "body": {
-                                                        "To": "@parameters('NotificationRecipients')",
-                                                        "Subject": "IOC Blocking DENIED by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']} |   @{triggerBody()?['Entity']?['properties']?['Value']}",
-                                                        "Body": "<p class=\"editor-paragraph\">The below file was <b><strong class=\"editor-text-bold\">not added </strong></b>to MDE Indicator list with the action set to <b><strong class=\"editor-text-bold\">block</strong></b>.<br><br>FileHash: @{body('Get_Info_FileHash_from_Alert')?['value']?['SHA256']}<br>FileName: @{body('Get_Info_FileHash_from_Alert')?['value']?['FileName']}<br>FolderPath: @{body('Get_Info_FileHash_from_Alert')?['value']?['Directory']}</p><br><br><p class=\"editor-paragraph\">IncidentNumber: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} <br>Requested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</p><p class=\"editor-paragraph\"><br>===================</p><br><p class=\"editor-paragraph\">Denied by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}<br>Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}</p>"
-                                                    },
-                                                    "path": "/v2/Mail"
-                                                }
-                                            }
-                                        }
-                                    },
-                                    "expression": {
-                                        "and": [
-                                            {
-                                                "equals": [
-                                                    "@body('Post_adaptive_card_and_wait_for_a_response')?['data']?['approvalResponse']",
-                                                    "approved"
-                                                ]
-                                            }
-                                        ]
-                                    },
-                                    "type": "If"
-                                },
-                                "Get_InitiatedBy": {
-                                    "runAfter": {
-                                        "Post_adaptive_card_and_wait_for_a_response": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "type": "ApiConnection",
-                                    "inputs": {
-                                        "host": {
-                                            "connection": {
-                                                "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"
-                                            }
-                                        },
-                                        "method": "post",
-                                        "body": {
-                                            "query": "SentinelHealth\n| where TimeGenerated > ago(4h)\n| where SentinelResourceName == 'Block_IP_on_Endpoint'\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ '@{outputs('Incident_ARM_ID')}'\n| sort by TimeGenerated desc",
-                                            "timerangetype": "2",
-                                            "timerange": {
-                                                "relativeTimeRange": "Last 4 hours"
-                                            }
-                                        },
-                                        "path": "/queryDataV2",
-                                        "queries": {
-                                            "subscriptions": "[subscription().subscriptionId]",
-                                            "resourcegroups": "[resourceGroup().name]",
-                                            "resourcetype": "Log Analytics Workspace",
-                                            "resourcename": "[parameters('LogAnalyticsWorkspaceName')]"
-                                        }
-                                    }
-                                }
-                            },
-                            "runAfter": {
-                                "Filter_array": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "else": {
-                                "actions": {}
-                            },
-                            "expression": {
-                                "and": [
-                                    {
-                                        "equals": [
-                                            "@length(body('Filter_array'))",
-                                            0
-                                        ]
-                                    }
-                                ]
-                            },
-                            "type": "If"
-                        },
-                        "Select_Value_Field": {
-                            "runAfter": {
-                                "Get_Indicators_List": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Select",
-                            "inputs": {
-                                "from": "@body('Get_Indicators_List')?['value']",
-                                "select": {
-                                    "indicatorValue": "@item()['indicatorValue']",
-                                    "indicatorType": "@item()['indicatorType']"
-                                }
-                            }
-                        },
-                        "Filter_array": {
-                            "runAfter": {
-                                "Select_Value_Field": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query",
-                            "inputs": {
-                                "from": "@body('Select_Value_Field')",
-                                "where": "@contains(item()['indicatorValue'],outputs('Entity'))"
-                            }
-                        },
-                        "Incident_ARM_ID": {
-                            "runAfter": {},
-                            "type": "Compose",
-                            "inputs": "@triggerBody()?['IncidentArmID']"
-                        },
-                        "Entity": {
-                            "runAfter": {},
-                            "type": "Compose",
-                            "inputs": "@triggerBody()?['Entity']?['properties']?['Value']"
-                        }
-                    },
-                    "outputs": {}
-                },
-                "parameters": {
-                    "$connections": {
-                        "value": {
-                            "azuresentinel": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('AzureSentinelAPI'))]",
-                                "connectionId": "[variables('connections_azuresentinel_externalid')]",
-                                "connectionName": "azuresentinel",
-                                "connectionProperties": {
-                                    "authentication": {
-                                        "identity": "[variables('userAssignedIdentityId')]",
-                                        "type": "ManagedServiceIdentity"
-                                    }
-                                }
-                            },
-                            "azuremonitorlogs": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'azuremonitorlogs')]",
-                                "connectionId": "[variables('connections_azuremonitorlogs_externalid')]",
-                                "connectionName": "azuremonitorlogs",
-                                "connectionProperties": {
-                                    "authentication": {
-                                        "identity": "[variables('userAssignedIdentityId')]",
-                                        "type": "ManagedServiceIdentity"
-                                    }
-                                }
-                            },
-                            "teams": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'teams')]",
-                                "connectionId": "[variables('connections_teams_externalid')]",
-                                "connectionName": "teams"
-                            },
-                            "office365": {
-                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]",
-                                "connectionId": "[variables('connections_office365_externalid')]",
-                                "connectionName": "office365"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "type": "Microsoft.Web/connections",
-            "apiVersion": "2016-06-01",
-            "name": "office365",
-            "location": "[variables('resourceGroupLocation')]",
-            "kind": "V1",
-            "properties": {
-                "displayName": "office365",
-                "customParameterValues": {},
-                "api": {
-                    "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]"
-                }
-            }
-        },
-        {
-            "type": "Microsoft.Web/connections",
-            "apiVersion": "2016-06-01",
-            "name": "teams",
-            "location": "[variables('resourceGroupLocation')]",
-            "kind": "V1",
-            "properties": {
-                "displayName": "teams",
-                "customParameterValues": {},
-                "api": {
-                    "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'teams')]"
-                }
-            }
-        },
-        {
-            "type": "Microsoft.Web/connections",
-            "apiVersion": "2016-06-01",
-            "name": "[parameters('LogAnalyticsAPI')]",
-            "location": "[variables('resourceGroupLocation')]",
-            "kind": "V1",
-            "properties": {
-                "displayName": "[parameters('LogAnalyticsAPI')]",
-                "customParameterValues": {},
-                "api": {
-                    "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('LogAnalyticsAPI'))]"
-                },
-                "parameterValueSet": {
-                    "username": "[reference(variables('logAnalyticsID'), '2015-03-20').customerId]",
-                    "password": "[listKeys(variables('logAnalyticsID'), '2015-03-20').primarySharedKey]"
-                }
-            }
-        }
-    ]
-}
+{  
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",  
+  "contentVersion": "1.0.0.0",  
+  "parameters": {  
+    "LogicAppName": {  
+      "defaultValue": "Block_FileHash_on_Endpoint",  
+      "type": "String"  
+    },  
+    "userAssignedIdentityName": {  
+      "defaultValue": "POCs_MI",  
+      "type": "String",  
+      "metadata": {  
+        "description": "This is the User Assigned Managed Identity with 'Priviledge User Administrator', 'Log Analytic Reader', and 'Sentinel Contributor' Roles assigned to it. This identity will be used to reset the password and revoke the sign-in sessions of the user accounts linked to the incident."  
+      }  
+    },  
+    "AzureSentinelAPI": {  
+      "defaultValue": "azuresentinel-3",  
+      "type": "String",  
+      "metadata": {  
+        "description": "This is the working Azure Sentinel API for Entity trigger and posting comments.",  
+        "displayName": "Azure Sentinel API"  
+      }  
+    },  
+    "LogAnalyticsAPI": {  
+      "defaultValue": "azuremonitorlogs",  
+      "type": "String",  
+      "metadata": {  
+        "description": "This is the working Azure Monitor Logs API for querying log data.",  
+        "displayName": "Azure Monitor Logs API"  
+      }  
+    },  
+    "LogAnalyticsWorkspaceName": {  
+      "defaultValue": "GoogleLab-Workspace",  
+      "type": "String",  
+      "metadata": {  
+        "description": "This is the log analytics workspace name where the Sentinel data is stored.",  
+        "displayName": "Log Analytics Workspace Name"  
+      }  
+    },  
+    "notificationEmailRecipients": {  
+      "defaultValue": "test@example.com",  
+      "type": "String",  
+      "metadata": {  
+        "description": "Comma-separated list of email addresses to notify when the incident is created."  
+      }  
+    }  
+  },  
+  "variables": {  
+    "resourceGroupLocation": "[resourceGroup().location]",  
+    "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",  
+    "logAnalyticsID": "[concat('/subscriptions/', subscription().subscriptionId,'/resourcegroups/', resourceGroup().name,'/providers/microsoft.operationalinsights/workspaces/',parameters('LogAnalyticsWorkspaceName'))]",  
+    "connections_azuresentinel_externalid": "[resourceId('Microsoft.Web/connections/', parameters('AzureSentinelAPI'))]",  
+    "connections_azuremonitorlogs_externalid": "[resourceId('Microsoft.Web/connections/', parameters('LogAnalyticsAPI'))]",  
+    "connections_teams_externalid": "[resourceId('Microsoft.Web/connections/', 'teams')]",  
+    "connections_office365_externalid": "[resourceId('Microsoft.Web/connections/', 'office365')]"  
+  },  
+  "resources": [  
+    {  
+      "type": "Microsoft.Logic/workflows",  
+      "apiVersion": "2017-07-01",  
+      "name": "[parameters('LogicAppName')]",  
+      "location": "[variables('resourceGroupLocation')]",  
+      "identity": {  
+        "type": "UserAssigned",  
+        "userAssignedIdentities": {  
+          "[variables('userAssignedIdentityId')]": {}  
+        }  
+      },  
+      "properties": {  
+        "state": "Enabled",  
+        "definition": {  
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",  
+          "contentVersion": "1.0.0.0",  
+          "parameters": {  
+            "NotificationRecipients": {  
+              "defaultValue": "[parameters('notificationEmailRecipients')]",  
+              "type": "String"  
+            },  
+            "$connections": {  
+              "defaultValue": {},  
+              "type": "Object"  
+            }  
+          },  
+          "triggers": {  
+            "Microsoft_Sentinel_entity": {  
+              "type": "ApiConnectionWebhook",  
+              "inputs": {  
+                "host": {  
+                  "connection": {  
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
+                  }  
+                },  
+                "body": {  
+                  "callback_url": "@listCallbackUrl()"  
+                },  
+                "path": "/entity/@{encodeURIComponent('FileHash')}"  
+              }  
+            }  
+          },  
+          "actions": {  
+            "Get_Indicators_List": {  
+              "runAfter": {  
+                "Incident_ARM_ID": [  
+                  "Succeeded"  
+                ],  
+                "Entity": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "Http",  
+              "inputs": {  
+                "uri": "https://api.securitycenter.microsoft.com/api/indicators",  
+                "method": "GET",  
+                "authentication": {  
+                  "type": "ManagedServiceIdentity",  
+                  "identity": "[variables('userAssignedIdentityId')]",  
+                  "audience": "https://api.securitycenter.windows.com"  
+                }  
+              },  
+              "operationOptions": "DisableAutomaticDecompression",  
+              "runtimeConfiguration": {  
+                "paginationPolicy": {  
+                  "minimumItemCount": 30000  
+                }  
+              }  
+            },  
+            "New_Indicator": {  
+              "actions": {  
+                "Get_Info_FileHash_from_Alert": {  
+                  "type": "ApiConnection",  
+                  "inputs": {  
+                    "host": {  
+                      "connection": {  
+                        "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"  
+                      }  
+                    },  
+                    "method": "post",  
+                    "body": {  
+                      "query": "let SuspiciousSHA256 = '@{outputs('Entity')}';\nlet SecAlerts=materialize(SecurityAlert\n| where StartTime > ago(7d)\n| where Entities has SuspiciousSHA256\n| summarize arg_max(TimeGenerated, AlertName, Entities) by SystemAlertId);\nlet ProcessEntity = SecAlerts\n | mv-expand todynamic(Entities)\n// | where Entities.Type has 'process'\n | where Entities has SuspiciousSHA256\n | extend CommandLine = tostring(Entities.CommandLine), ProcessDirectory = tostring(Entities.ImageFile.Directory), ProcessFileName = tostring(Entities.ImageFile.Name), ProcessSHA256 = tostring(extract_all(@'SHA256\",\"Value\":\"(.*?[^\\\"]+)\"', tostring(Entities)))\n | project SystemAlertId, CommandLine, ProcessDirectory, ProcessFileName, ProcessSHA256;\nlet FileEntity = SecAlerts\n | mv-expand todynamic(Entities)\n | where Entities.Type has 'file'\n | where Entities has SuspiciousSHA256\n | extend Directory=tostring(coalesce(Entities.Directory,Entities.ImageFile.Directory, Entities.ParentProcess.ImageFile.Directory)), FileName=tostring(coalesce(Entities.Name, Entities.ImageFile.Name, Entities.ParentProcess.ImageFile.Name)), SHA256 = tostring(extract_all(@'SHA256\",\"Value\":\"(.*?[^\\\"]+)\"', tostring(Entities)))\n | project SystemAlertId, Directory, FileName, SHA256;\nSecAlerts\n| lookup kind=leftouter (ProcessEntity) on SystemAlertId\n| lookup kind=leftouter (FileEntity) on SystemAlertId\n| where ProcessSHA256 has SuspiciousSHA256 or SHA256 has SuspiciousSHA256\n| mv-expand todynamic(ProcessSHA256), todynamic(SHA256)\n| distinct ProcessDirectory, ProcessFileName, tostring(ProcessSHA256), Directory, FileName, tostring(SHA256)\n| summarize Directory=makeset(tolower(coalesce(ProcessDirectory,Directory))), FileName=makeset(tolower(coalesce(ProcessFileName,FileName))) by SHA256=coalesce(ProcessSHA256,SHA256)\n| project SHA256, Directory=replace(@\"[\\[\\]\"\"]\", \"\", tostring(Directory)), FileName=replace(@\"[\\[\\]\"\"]\", \"\", tostring(FileName))",  
+                      "timerangetype": "2",  
+                      "timerange": {  
+                        "relativeTimeRange": "Last 7 days"  
+                      }  
+                    },  
+                    "path": "/queryDataV2",  
+                    "queries": {  
+                      "subscriptions": "[subscription().subscriptionId]",  
+                      "resourcegroups": "[resourceGroup().name]",  
+                      "resourcetype": "Log Analytics Workspace",  
+                      "resourcename": "[parameters('LogAnalyticsWorkspaceName')]"  
+                    }  
+                  }  
+                },  
+                "Is_Approved": {  
+                  "actions": {},  
+                  "runAfter": {  
+                    "Post_adaptive_card_and_wait_for_a_response": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "else": {  
+                    "actions": {}  
+                  },  
+                  "expression": {  
+                    "and": [  
+                      {  
+                        "equals": [  
+                          "@body('Post_adaptive_card_and_wait_for_a_response')?['data']?['approvalResponse']",  
+                          "approved"  
+                        ]  
+                      }  
+                    ]  
+                  },  
+                  "type": "If"  
+                },  
+                "Post_adaptive_card_and_wait_for_a_response": {  
+                  "runAfter": {  
+                    "Get_InitiatedBy": [  
+                      "Skipped"  
+                    ]  
+                  },  
+                  "type": "ApiConnectionWebhook",  
+                  "inputs": {  
+                    "host": {  
+                      "connection": {  
+                        "name": "@parameters('$connections')['teams']['connectionId']"  
+                      }  
+                    },  
+                    "body": {  
+                      "notificationUrl": "@listCallbackUrl()",  
+                      "body": {  
+                        "messageBody": "{\n  \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\n  \"version\": \"1.2\",\n  \"type\": \"AdaptiveCard\",\n  \"body\": [\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"IOC Blocking Approval Request - SHA256 Filehash\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"Please review the IOC for blocking below and provide decision .You may include additional comments as needed.\",\n      \"wrap\": true\n    },    \n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"Directory: @{first(body('Get_Info_FileHash_from_Alert')?['value'])?['Directory']}\",\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"FileName: @{first(body('Get_Info_FileHash_from_Alert')?['value'])?['FileName']}\",\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"FileHash: @{first(body('Get_Info_FileHash_from_Alert')?['value'])?['SHA256']}\",\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"[View Related Incident](https://portal.azure.com/#view/Microsoft_Azure_Security_Insights/IncidentPage.ReactView/incidentArmId/@{encodeUriComponent(outputs('Incident_ARM_ID'))})\",\n      \"wrap\": true,\n      \"color\": \"Accent\",\n      \"spacing\": \"Medium\"\n    },\n    {\n      \"type\": \"Input.Text\",\n      \"id\": \"comment\",\n      \"placeholder\": \"Enter your comment here...\",\n      \"isMultiline\": true\n    }\n  ],\n  \"actions\": [\n    {\n      \"type\": \"Action.Submit\",\n      \"title\": \"Approve\",\n      \"data\": {\n        \"approvalResponse\": \"approved\"\n      }\n    },\n    {\n      \"type\": \"Action.Submit\",\n      \"title\": \"Reject\",\n      \"data\": {\n        \"approvalResponse\": \"rejected\"\n      }\n    }\n  ]\n}",  
+                        "updateMessage": "Thanks for your response!",  
+                        "recipient": {  
+                          "groupId": "",  
+                          "channelId": ""  
+                        }  
+                      }  
+                    },  
+                    "path": ""  
+                  }  
+                },  
+                "HTTP_-_SHA256_-_block": {  
+                  "runAfter": {  
+                    "Get_InitiatedBy": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "Http",  
+                  "inputs": {  
+                    "uri": "https://api.securitycenter.microsoft.com/api/indicators",  
+                    "method": "POST",  
+                    "body": {  
+                      "indicatorValue": "@{first(body('Get_Info_FileHash_from_Alert')?['value'])?['SHA256']}",  
+                      "indicatorType": "FileSha256",  
+                      "title": "Filename: @{if(empty(first(body('Get_Info_FileHash_from_Alert')?['value'])?['FileName']), 'n/a', first(body('Get_Info_FileHash_from_Alert')?['value'])?['FileName'])}- Incident @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} - @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']} ",  
+                      "application": "[parameters('LogicAppName')]",  
+                      "expirationTime": "@addDays(utcNow(), 365)",  
+                      "action": "Block",  
+                      "severity": "Medium",  
+                      "description": "Playbook - Incident @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} - @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']} ",  
+                      "recommendedActions": "preApproved",  
+                      "GenerateAlert": "True"  
+                    },  
+                    "authentication": {  
+                      "type": "ManagedServiceIdentity",  
+                      "identity": "[variables('userAssignedIdentityId')]",  
+                      "audience": "https://api.securitycenter.windows.com"  
+                    }  
+                  },  
+                  "runtimeConfiguration": {  
+                    "contentTransfer": {  
+                      "transferMode": "Chunked"  
+                    }  
+                  }  
+                },  
+                "Add_comment_to_incident_(V3)": {  
+                  "runAfter": {  
+                    "Compose_-_HTML": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "ApiConnection",  
+                  "inputs": {  
+                    "host": {  
+                      "connection": {  
+                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
+                      }  
+                    },  
+                    "method": "post",  
+                    "body": {  
+                      "incidentArmId": "@triggerBody()?['IncidentArmID']",  
+                      "message": "@{outputs('Compose_-_HTML')}"  
+                    },  
+                    "path": "/Incidents/Comment"  
+                  }  
+                },  
+                "Send_an_email_-_approved": {  
+                  "runAfter": {  
+                    "Add_comment_to_incident_(V3)": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "ApiConnection",  
+                  "inputs": {  
+                    "host": {  
+                      "connection": {  
+                        "name": "@parameters('$connections')['office365']['connectionId']"  
+                      }  
+                    },  
+                    "method": "post",  
+                    "body": {  
+                      "To": "@parameters('NotificationRecipients')",  
+                      "Subject": "IOC Block Action Initiated by @{first(body('Get_InitiatedBy')?['value'])?['TriggeredBy']} | Sha256 (@{coalesce(first(body('Get_Info_FileHash_from_Alert')?['value'])?['FileName'],outputs('Entity'))})",  
+                      "Body": "@{outputs('Compose_-_HTML')}"  
+                    },  
+                    "path": "/v2/Mail"  
+                  }  
+                },  
+                "Get_InitiatedBy": {  
+                  "runAfter": {  
+                    "Get_Info_FileHash_from_Alert": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "ApiConnection",  
+                  "inputs": {  
+                    "host": {  
+                      "connection": {  
+                        "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"  
+                      }  
+                    },  
+                    "method": "post",  
+                    "body": {  
+                      "query": "[concat('SentinelHealth\n| where TimeGenerated > ago(10m)\n| where SentinelResourceName == ''', parameters('LogicAppName'), '''\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ ''@{outputs(''Incident_ARM_ID'')}''\n| sort by TimeGenerated desc')]",  
+                      "timerangetype": "2",  
+                      "timerange": {  
+                        "relativeTimeRange": "Last hour"  
+                      }  
+                    },  
+                    "path": "/queryDataV2",  
+                    "queries": {  
+                      "subscriptions": "[subscription().subscriptionId]",  
+                      "resourcegroups": "[resourceGroup().name]",  
+                      "resourcetype": "Log Analytics Workspace",  
+                      "resourcename": "[parameters('LogAnalyticsWorkspaceName')]"  
+                    }  
+                  }  
+                },  
+                "Compose_-_HTML": {  
+                  "runAfter": {  
+                    "HTTP_-_SHA256_-_block": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "Compose",  
+                  "inputs": "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <style>\n    body {\n      font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;\n      background-color: #ffffff;\n      color: #333;\n    }\n    .container {\n      padding: 20px;\n      border: 1px solid #ddd;\n      border-radius: 6px;\n    }\n    .header {\n      font-size: 18px;\n      font-weight: bold;\n      color: #2e6c80;\n      margin-bottom: 10px;\n    }\n    .section-title {\n      font-weight: bold;\n      margin-top: 20px;\n      margin-bottom: 10px;\n    }\n    .details {\n      background-color: #f4f4f4;\n      padding: 15px;\n      border-radius: 5px;\n    }\n    .detail-item {\n      margin-bottom: 10px;\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">File Hash Blocked via MDE Indicator</div>\n\n    <p>The following file hash has been successfully added to the Microsoft Defender for Endpoint (MDE) Indicator list with the action set to <strong>Block</strong>:</p>\n\n    <div class=\"details\">\n      <div class=\"detail-item\"><strong>File Hash (SHA256):</strong> @{first(body('Get_Info_FileHash_from_Alert')?['value'])?['SHA256']}</div>\n      <div class=\"detail-item\"><strong>File Name:</strong> @{if(empty(first(body('Get_Info_FileHash_from_Alert')?['value'])?['FileName']), 'n/a', first(body('Get_Info_FileHash_from_Alert')?['value'])?['FileName'])}</div>\n      <div class=\"detail-item\"><strong>Folder Path:</strong> @{if(empty(first(body('Get_Info_FileHash_from_Alert')?['value'])?['Directory']), 'n/a', first(body('Get_Info_FileHash_from_Alert')?['value'])?['Directory'])}</div>\n    </div>\n\n    <div class=\"section-title\">Incident Details:</div>\n    <div class=\"details\">\n      <div class=\"detail-item\"><strong>Incident Number:</strong> @{first(body('Get_InitiatedBy')?['value'])?['IncidentNumber']}</div>\n      <div class=\"detail-item\"><strong>Requested By:</strong> @{first(body('Get_InitiatedBy')?['value'])?['TriggeredBy']}</div>\n    </div>\n\n    <p>If you have any questions or require further assistance, please contact the security operations team.</p>\n  </div>\n</body>\n</html>\n"  
+                }  
+              },  
+              "runAfter": {  
+                "Filter_array": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "else": {  
+                "actions": {  
+                  "Add_incident_comment1": {  
+                    "type": "ApiConnection",  
+                    "inputs": {  
+                      "host": {  
+                        "connection": {  
+                          "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
+                        }  
+                      },  
+                      "method": "post",  
+                      "body": {  
+                        "incidentArmId": "@triggerBody()?['IncidentArmID']",  
+                        "message": "<p class=\"editor-paragraph\">@{outputs('Entity')} already exist in MDE Indicator list with the action set to <b><strong class=\"editor-text-bold\">block</strong></b>.</p>"  
+                      },  
+                      "path": "/Incidents/Comment"  
+                    }  
+                  }  
+                }  
+              },  
+              "expression": {  
+                "and": [  
+                  {  
+                    "equals": [  
+                      "@length(body('Filter_array'))",  
+                      0  
+                    ]  
+                  }  
+                ]  
+              },  
+              "type": "If"  
+            },  
+            "Select_Value_Field": {  
+              "runAfter": {  
+                "Get_Indicators_List": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "Select",  
+              "inputs": {  
+                "from": "@body('Get_Indicators_List')?['value']",  
+                "select": {  
+                  "indicatorValue": "@item()['indicatorValue']",  
+                  "indicatorType": "@item()['indicatorType']"  
+                }  
+              }  
+            },  
+            "Filter_array": {  
+              "runAfter": {  
+                "Select_Value_Field": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "Query",  
+              "inputs": {  
+                "from": "@body('Select_Value_Field')",  
+                "where": "@contains(item()['indicatorValue'],outputs('Entity'))"  
+              }  
+            },  
+            "Incident_ARM_ID": {  
+              "runAfter": {},  
+              "type": "Compose",  
+              "inputs": "@triggerBody()?['IncidentArmID']"  
+            },  
+            "Entity": {  
+              "runAfter": {},  
+              "type": "Compose",  
+              "inputs": "@triggerBody()?['Entity']?['properties']?['Value']"  
+            }  
+          },  
+          "outputs": {}  
+        },  
+        "parameters": {  
+          "$connections": {  
+            "value": {  
+              "azuresentinel": {  
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('AzureSentinelAPI'))]",  
+                "connectionId": "[variables('connections_azuresentinel_externalid')]",  
+                "connectionName": "azuresentinel",  
+                "connectionProperties": {  
+                  "authentication": {  
+                    "identity": "[variables('userAssignedIdentityId')]",  
+                    "type": "ManagedServiceIdentity"  
+                  }  
+                }  
+              },  
+              "azuremonitorlogs": {  
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'azuremonitorlogs')]",  
+                "connectionId": "[variables('connections_azuremonitorlogs_externalid')]",  
+                "connectionName": "azuremonitorlogs",  
+                "connectionProperties": {  
+                  "authentication": {  
+                    "identity": "[variables('userAssignedIdentityId')]",  
+                    "type": "ManagedServiceIdentity"  
+                  }  
+                }  
+              },  
+              "teams": {  
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'teams')]",  
+                "connectionId": "[variables('connections_teams_externalid')]",  
+                "connectionName": "teams"  
+              },  
+              "office365": {  
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]",  
+                "connectionId": "[variables('connections_office365_externalid')]",  
+                "connectionName": "office365"  
+              }  
+            }  
+          }  
+        }  
+      }  
+    },  
+    {  
+      "type": "Microsoft.Web/connections",  
+      "apiVersion": "2016-06-01",  
+      "name": "office365",  
+      "location": "[variables('resourceGroupLocation')]",  
+      "kind": "V1",  
+      "properties": {  
+        "displayName": "office365",  
+        "customParameterValues": {},  
+        "api": {  
+          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]"  
+        }  
+      }  
+    },  
+    {  
+      "type": "Microsoft.Web/connections",  
+      "apiVersion": "2016-06-01",  
+      "name": "teams",  
+      "location": "[variables('resourceGroupLocation')]",  
+      "kind": "V1",  
+      "properties": {  
+        "displayName": "teams",  
+        "customParameterValues": {},  
+        "api": {  
+          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'teams')]"  
+        }  
+      }  
+    },  
+    {  
+      "type": "Microsoft.Web/connections",  
+      "apiVersion": "2016-06-01",  
+      "name": "[parameters('LogAnalyticsAPI')]",  
+      "location": "[variables('resourceGroupLocation')]",  
+      "kind": "V1",  
+      "properties": {  
+        "displayName": "[parameters('LogAnalyticsAPI')]",  
+        "customParameterValues": {},  
+        "api": {  
+          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('LogAnalyticsAPI'))]"  
+        },  
+        "parameterValueSet": {  
+          "username": "[reference(variables('logAnalyticsID'), '2015-03-20').customerId]",  
+          "password": "[listKeys(variables('logAnalyticsID'), '2015-03-20').primarySharedKey]"  
+        }  
+      }  
+    }  
+  ],  
+  "metadata": {  
+    "description": "This ARM template deploys an Azure Logic App to orchestrate automatic blocking of File Hashes (SHA256) in Microsoft Defender for Endpoint, with approval and notification via Teams and Office365, and full Sentinel and Log Analytics integration. Enables one-click 'Deploy to Azure'."  
+  },  
+  "outputs": {  
+    "logicAppResourceId": {  
+      "type": "string",  
+      "value": "[resourceId('Microsoft.Logic/workflows', parameters('LogicAppName'))]"  
+    },  
+    "logicAppRunUrl": {  
+      "type": "string",  
+      "value": "[concat('https://portal.azure.com/#@', tenant().tenantId, '/resource', resourceId('Microsoft.Logic/workflows', parameters('LogicAppName')), '/overview')]"  
+    }  
+  }  
+}  
