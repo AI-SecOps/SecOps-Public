@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",  
   "parameters": {  
     "LogicAppName": {  
-      "defaultValue": "ResetPasswordSessionRevoke",  
+      "defaultValue": "ResetPasswordSessionRevoke-Incident",  
       "type": "String"  
     },  
     "userAssignedIdentityName": {  
@@ -45,7 +45,7 @@
       "type": "string",  
       "defaultValue": "",  
       "metadata": {  
-        "description": "Azure AD Group ID for containment."  
+        "description": "Azure AD Group ID for containment, if account should be added to a group."  
       }  
     }  
   },  
@@ -89,7 +89,7 @@
             }  
           },  
           "triggers": {  
-            "Microsoft_Sentinel_entity": {  
+            "Microsoft_Sentinel_incident": {  
               "type": "ApiConnectionWebhook",  
               "inputs": {  
                 "host": {  
@@ -100,13 +100,48 @@
                 "body": {  
                   "callback_url": "@{listCallbackUrl()}"  
                 },  
-                "path": "/entity/@{encodeURIComponent('Account')}"  
+                "path": "/incident-creation"  
               }  
             }  
           },  
           "actions": {  
-            "Initialize_ActionsTaken": {  
+            "Entities_-_Get_Accounts": {  
               "runAfter": {},  
+              "type": "ApiConnection",  
+              "inputs": {  
+                "host": {  
+                  "connection": {  
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
+                  }  
+                },  
+                "method": "post",  
+                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",  
+                "path": "/entities/account"  
+              }  
+            },  
+            "Threshold": {  
+              "runAfter": {  
+                "Entities_-_Get_Accounts": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "InitializeVariable",  
+              "inputs": {  
+                "variables": [  
+                  {  
+                    "name": "Threshold",  
+                    "type": "integer",  
+                    "value": 10  
+                  }  
+                ]  
+              }  
+            },  
+            "Initialize_ActionsTaken": {  
+              "runAfter": {  
+                "Threshold": [  
+                  "Succeeded"  
+                ]  
+              },  
               "type": "InitializeVariable",  
               "inputs": {  
                 "variables": [  
@@ -118,152 +153,158 @@
                 ]  
               }  
             },  
-            "Add_User_to_Group": {  
+            "Entity_Count": {  
               "runAfter": {  
                 "Initialize_ActionsTaken": [  
                   "Succeeded"  
                 ]  
               },  
-              "type": "Http",  
-              "inputs": {  
-                "uri": "https://graph.microsoft.com/v1.0/groups/@{parameters('group-id')}/members/$ref",  
-                "method": "POST",  
-                "headers": {  
-                  "Content-type": "application/json"  
-                },  
-                "body": {  
-                  "@@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/@{triggerBody()?['Entity']?['properties']?['aadUserId']}"  
-                },  
-                "authentication": {  
-                  "type": "ManagedServiceIdentity",  
-                  "identity": "[variables('userAssignedIdentityId')]",  
-                  "audience": "https://graph.microsoft.com"  
-                }  
-              },  
-              "runtimeConfiguration": {  
-                "contentTransfer": {  
-                  "transferMode": "Chunked"  
-                }  
-              }  
-            },  
-            "Get_UPN": {  
-              "runAfter": {  
-                "Add_User_to_Group": [  
-                  "Succeeded",  
-                  "Failed",  
-                  "Skipped"  
-                ]  
-              },  
               "type": "Compose",  
-              "inputs": "@coalesce(triggerBody()?['Entity']?['properties']?['additionalData']?['UpnName'],triggerBody()?['Entity']?['properties']?['additionalData']?['UserPrincipalName'])"  
+              "inputs": "@length(body('Entities_-_Get_Accounts')?['Accounts'])"  
             },  
-            "Reset_a_password": {  
-              "runAfter": {  
-                "Get_UPN": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "Http",  
-              "inputs": {  
-                "uri": "https://graph.microsoft.com/v1.0/users/@{outputs('Get_UPN')}",  
-                "method": "PATCH",  
-                "body": {  
-                  "passwordProfile": {  
-                    "forceChangePasswordNextSignIn": true,  
-                    "forceChangePasswordNextSignInWithMfa": false,  
-                    "password": "@{substring(triggerBody()?['Entity']?['name'], 2, 10)}"  
-                  }  
-                },  
-                "authentication": {  
-                  "type": "ManagedServiceIdentity",  
-                  "identity": "[variables('userAssignedIdentityId')]",  
-                  "audience": "https://graph.microsoft.com"  
-                }  
-              },  
-              "runtimeConfiguration": {  
-                "contentTransfer": {  
-                  "transferMode": "Chunked"  
-                }  
-              }  
-            },  
-            "Append_to_ActionsTaken": {  
-              "runAfter": {  
-                "Reset_a_password": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "AppendToArrayVariable",  
-              "inputs": {  
-                "name": "ActionsTaken",  
-                "value": "User @{outputs('Get_UPN')} password has been successfully reset."  
-              }  
-            },  
-            "Revoke_sign-in_session": {  
-              "runAfter": {  
-                "Append_to_ActionsTaken": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "Http",  
-              "inputs": {  
-                "uri": "https://graph.microsoft.com/v1.0/users/@{outputs('Get_UPN')}/revokeSignInSessions",  
-                "method": "POST",  
-                "authentication": {  
-                  "type": "ManagedServiceIdentity",  
-                  "identity": "[variables('userAssignedIdentityId')]",  
-                  "audience": "https://graph.microsoft.com"  
-                }  
-              },  
-              "runtimeConfiguration": {  
-                "contentTransfer": {  
-                  "transferMode": "Chunked"  
-                }  
-              }  
-            },  
-            "Append_to_ActionsTaken2": {  
-              "runAfter": {  
-                "Revoke_sign-in_session": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "AppendToArrayVariable",  
-              "inputs": {  
-                "name": "ActionsTaken",  
-                "value": "User @{outputs('Get_UPN')} active sign-in sessions have been revoked"  
-              }  
-            },  
-            "Send_an_email_(V2)": {  
-              "runAfter": {  
-                "Append_to_ActionsTaken2": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "ApiConnection",  
-              "inputs": {  
-                "host": {  
-                  "connection": {  
-                    "name": "@parameters('$connections')['office365']['connectionId']"  
-                  }  
-                },  
-                "method": "post",  
-                "body": {  
-                  "To": "@parameters('NotificationRecipients')",  
-                  "Subject": "Password Reset and Session Revocation for user @{outputs('Get_UPN')}",  
-                  "Body": "<style>\n    body {\n      font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;\n      background-color: #ffffff;\n      color: #333;\n    }\n    .container {\n      padding: 20px;\n      border: 1px solid #ddd;\n      border-radius: 6px;\n    }\n    .header {\n      font-size: 18px;\n      font-weight: bold;\n      color: #2e6c80;\n      margin-bottom: 10px;\n    }\n    .section-title {\n      font-weight: bold;\n      margin-top: 20px;\n      margin-bottom: 10px;\n    }\n    .actions {\n      background-color: #f4f4f4;\n      padding: 15px;\n      border-radius: 5px;\n    }\n    .action-item {\n      margin-bottom: 10px;\n    }\n  </style>\n<div class=\"container\">\n  <div class=\"header\">Security Response Notification</div>\n  <p>The following actions have been successfully executed using the Sentinel Playbook <strong>ResetPasswordSessionRevoke</strong> for the account:</p>\n  <p><strong>@{outputs('Get_UPN')}</strong></p>\n  <div class=\"section-title\">Actions Performed:</div>\n  <div class=\"actions\">\n    <div class=\"action-item\">\n      @{if(contains(join(variables('ActionsTaken'), ' '), 'password has been successfully reset'), concat('✅ The password for user ', outputs('Get_UPN'), ' has been successfully reset. The user will be prompted to set a new password upon next sign-in.'), '')}\n    </div>\n    <div class=\"action-item\">\n      @{if(contains(join(variables('ActionsTaken'), ' '), 'active sign-in sessions have been revoked'), '🔒 All active sign-in sessions for this user have been revoked. The user must reauthenticate in all applications to regain access.', '')}\n    </div>\n  </div>\n  <p>If you have any questions or require further assistance, please contact the security operations team.</p>\n</div>",  
-                  "Importance": "Normal"  
-                },  
-                "path": "/v2/Mail"  
-              }  
-            },  
-            "IsSentinel_Incident": {  
+            "Within_Threshold": {  
               "actions": {  
-                "Compose_Comments": {  
-                  "type": "Compose",  
-                  "inputs": "[Analyst Action]\n\n@{join(variables('ActionsTaken'), '\n- ')}"  
+                "For_each": {  
+                  "foreach": "@body('Entities_-_Get_Accounts')?['Accounts']",  
+                  "actions": {  
+                    "Get_UPN": {  
+                      "type": "Compose",  
+                      "inputs": "@coalesce(items('For_each')?['additionalData']?['UserPrincipalName'],items('For_each')?['additionalData']?['UpnName'])"  
+                    },  
+                    "Add_User_to_Group": {  
+                      "runAfter": {  
+                        "Get_UPN": [  
+                          "Succeeded"  
+                        ]  
+                      },  
+                      "type": "Http",  
+                      "inputs": {  
+                        "uri": "https://graph.microsoft.com/v1.0/groups/@{parameters('group-id')}/members/$ref",  
+                        "method": "POST",  
+                        "headers": {  
+                          "Content-type": "application/json"  
+                        },  
+                        "body": {  
+                          "@@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/@{items('For_each')?['aadUserId']}"  
+                        },  
+                        "authentication": {  
+                          "type": "ManagedServiceIdentity",  
+                          "identity": "[variables('userAssignedIdentityId')]",  
+                          "audience": "https://graph.microsoft.com"  
+                        }  
+                      },  
+                      "runtimeConfiguration": {  
+                        "contentTransfer": {  
+                          "transferMode": "Chunked"  
+                        }  
+                      }  
+                    },  
+                    "Reset_a_password": {  
+                      "runAfter": {  
+                        "Add_User_to_Group": [  
+                          "Succeeded",  
+                          "Failed",  
+                          "Skipped"  
+                        ]  
+                      },  
+                      "type": "Http",  
+                      "inputs": {  
+                        "uri": "https://graph.microsoft.com/v1.0/users/@{outputs('Get_UPN')}",  
+                        "method": "PATCH",  
+                        "body": {  
+                          "passwordProfile": {  
+                            "forceChangePasswordNextSignIn": true,  
+                            "forceChangePasswordNextSignInWithMfa": false,  
+                            "password": "@{substring(outputs('Add_User_to_Group')?['headers']['request-id'], 2, 10)}"  
+                          }  
+                        },  
+                        "authentication": {  
+                          "type": "ManagedServiceIdentity",  
+                          "identity": "[variables('userAssignedIdentityId')]",  
+                          "audience": "https://graph.microsoft.com"  
+                        }  
+                      },  
+                      "runtimeConfiguration": {  
+                        "contentTransfer": {  
+                          "transferMode": "Chunked"  
+                        }  
+                      }  
+                    },  
+                    "Append_to_ActionsTaken": {  
+                      "runAfter": {  
+                        "Reset_a_password": [  
+                          "Succeeded"  
+                        ]  
+                      },  
+                      "type": "AppendToArrayVariable",  
+                      "inputs": {  
+                        "name": "ActionsTaken",  
+                        "value": "User @{outputs('Get_UPN')} password has been successfully reset."  
+                      }  
+                    },  
+                    "Revoke_sign-in_session": {  
+                      "runAfter": {  
+                        "Append_to_ActionsTaken": [  
+                          "Succeeded"  
+                        ]  
+                      },  
+                      "type": "Http",  
+                      "inputs": {  
+                        "uri": "https://graph.microsoft.com/v1.0/users/@{outputs('Get_UPN')}/revokeSignInSessions",  
+                        "method": "POST",  
+                        "authentication": {  
+                          "type": "ManagedServiceIdentity",  
+                          "identity": "[variables('userAssignedIdentityId')]",  
+                          "audience": "https://graph.microsoft.com"  
+                        }  
+                      },  
+                      "runtimeConfiguration": {  
+                        "contentTransfer": {  
+                          "transferMode": " "Chunked""  
+                        }  
+                      }  
+                    },  
+                    "Append_to_ActionsTaken2": {  
+                      "runAfter": {  
+                        "Revoke_sign-in_session": [  
+                          "Succeeded"  
+                        ]  
+                      },  
+                      "type": "AppendToArrayVariable",  
+                      "inputs": {  
+                        "name": "ActionsTaken",  
+                        "value": "User @{outputs('Get_UPN')} active sign-in sessions have been revoked"  
+                      }  
+                    },  
+                    "Send_an_email_(V2)": {  
+                      "runAfter": {  
+                        "Append_to_ActionsTaken2": [  
+                          "Succeeded"  
+                        ]  
+                      },  
+                      "type": "ApiConnection",  
+                      "inputs": {  
+                        "host": {  
+                          "connection": {  
+                            "name": "@parameters('$connections')['office365']['connectionId']"  
+                          }  
+                        },  
+                        "method": "post",  
+                        "body": {  
+                          "To": "@parameters('NotificationRecipients')",  
+                          "Subject": "Security Incident Response: Password Reset and Session Revocation for user @{outputs('Get_UPN')}",  
+                          "Body": "<style>body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#fff;color:#333;}.container{padding:20px;border:1px solid #ddd;border-radius:6px;}.header{font-size:18px;font-weight:bold;color:#2e6c80;margin-bottom:10px;}.section-title{font-weight:bold;margin-top:20px;margin-bottom:10px;}.actions{background-color:#f4f4f4;padding:15px;border-radius:5px;}.action-item{margin-bottom:10px;}</style><div class=\"container\"><div class=\"header\">Incident Action Summary</div><p>The following actions have been successfully executed for the incident titled:</p><p><strong>@{triggerBody()?['object']?['properties']?['title']}</strong></p><p>using the Sentinel Playbook <strong>ResetPasswordSessionRevoke</strong> for the account:</p><p><strong>@{outputs('Get_UPN')}</strong></p><div class=\"section-title\">Actions Taken:</div><div class=\"actions\"><div class=\"action-item\">@{if(contains(join(variables('ActionsTaken'), ' '), 'password has been successfully reset'), concat('✅ The password for user ', outputs('Get_UPN'), ' has been successfully reset.'), '')}</div><div class=\"action-item\">@{if(contains(join(variables('ActionsTaken'), ' '), 'active sign-in sessions have been revoked'), '🔒 All active sign-in sessions for this user have been revoked.', '')}</div></div><p>If you have any questions or need further assistance, please contact the security operations team.</p></div>",  
+                          "Importance": "Normal"  
+                        },  
+                        "path": "/v2/Mail"  
+                      }  
+                    }  
+                  },  
+                  "type": "Foreach"  
                 },  
-                "Add_comment_to_incident": {  
+                "Add_comment_to_incident_(V3)": {  
                   "runAfter": {  
-                    "Compose_Comments": [  
+                    "For_each": [  
                       "Succeeded"  
                     ]  
                   },  
@@ -276,30 +317,47 @@
                     },  
                     "method": "post",  
                     "body": {  
-                      "incidentArmId": "@triggerBody()?['IncidentArmID']",  
-                      "message": "<p class=\"editor-paragraph\">@{outputs('Compose_Comments')}</p>"  
+                      "incidentArmId": "@triggerBody()?['object']?['id']",  
+                      "message": "<p class=\"editor-paragraph\"><b><strong class=\"editor-text-bold\" style=\"font-size: 12px;\">Actions Taken:</strong></b></p><br><p class=\"editor-paragraph\">@{join(variables('ActionsTaken'), '\n- ')}</p>"  
                     },  
                     "path": "/Incidents/Comment"  
                   }  
                 }  
               },  
               "runAfter": {  
-                "Send_an_email_(V2)": [  
+                "Entity_Count": [  
                   "Succeeded"  
                 ]  
               },  
               "else": {  
-                "actions": {}  
+                "actions": {  
+                  "Send_an_email_-_Threshold_Exceeded": {  
+                    "type": "ApiConnection",  
+                    "inputs": {  
+                      "host": {  
+                        "connection": {  
+                          "name": "@parameters('$connections')['office365']['connectionId']"  
+                        }  
+                      },  
+                      "method": "post",  
+                      "body": {  
+                        "To": "@parameters('NotificationRecipients')",  
+                        "Subject": "[concat('Automation Skipped: Account Threshold Exceeded for ', parameters('workflows_ResetPasswordSessionRevoke_Incident_name'))]",  
+                        "Body": "[concat('<style>body{font-family:\"Segoe UI\",Tahoma,Geneva,Verdana,sans-serif;background-color:#fff;color:#333;}.container{padding:20px;border:1px solid #ddd;border-radius:6px;}.header{font-size:18px;font-weight:bold;color:#b00020;margin-bottom:10px;}.section-title{font-weight:bold;margin-top:20px;margin-bottom:10px;}.note{background-color:#fff3cd;border:1px solid #ffeeba;padding:15px;border-radius:5px;color:#856404;}</style><div class=\"container\"><div class=\"header\">Playbook Execution Skipped</div><p>The Sentinel Playbook <strong>', parameters('workflows_ResetPasswordSessionRevoke_Incident_name'), '</strong> was not executed for the following incident:</p><p><strong>@{triggerBody()?['object']?['properties']?['title']}</strong></p><div class=\"section-title\">Reason:</div><div class=\"note\">The incident contains more than <strong>@{variables('Threshold')}</strong> linked accounts, which exceeds the configured execution threshold.</div><div class=\"section-title\">Recommended Actions:</div><ul><li>🔄 Review the incident details in Microsoft Sentinel.</li><li>🛠️ Execute the <strong>ResetPasswordSessionRevoke-Account</strong> playbook manually for each affected account.</li><li>⚙️ If appropriate, consider increasing the threshold limit to allow automatic execution for incidents with more linked accounts.</li></ul><p>If you have any questions or require assistance, please contact the security operations team.</p></div>')]",  
+                        "Importance": "Normal"  
+                      },  
+                      "path": "/v2/Mail"  
+                    }  
+                  }  
+                }  
               },  
               "expression": {  
                 "and": [  
                   {  
-                    "not": {  
-                      "equals": [  
-                        "@triggerBody()?['IncidentArmID']",  
-                        "@null"  
-                      ]  
-                    }  
+                    "lessOrEquals": [  
+                      "@outputs('Entity_Count')",  
+                      "@variables('Threshold')"  
+                    ]  
                   }  
                 ]  
               },  
@@ -359,7 +417,7 @@
     }  
   ],  
   "metadata": {  
-    "description": "Deploys a Logic App that resets user password, revokes sessions, adds user to group, and posts notification and comments for Sentinel playbooks. Parameters allow group and notification customization for security identity response automation."  
+    "description": "Deploys a Logic App that performs account containment, password resets, and session revocation for all linked accounts in a Sentinel incident, notifies by email, and adds incident comments. Threshold can prevent bulk execution for large incidents. Uses a single Sentinel API connection for all actions."  
   },  
   "outputs": {  
     "logicAppResourceId": {  
