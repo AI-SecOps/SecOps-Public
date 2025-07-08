@@ -233,7 +233,7 @@
                         },  
                         "method": "post",  
                         "body": {  
-                          "query": "SentinelHealth\n| where TimeGenerated > ago(4h)\n| where SentinelResourceName == 'Block_FileHash_on_Endpoint'\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ '@{outputs(''Incident_ARM_ID'')}'\n| sort by TimeGenerated desc",  
+                          "query": "SentinelHealth\n| where TimeGenerated > ago(4h)\n| where SentinelResourceName == 'Block_FileHash_on_Endpoint'\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ '@{outputs('Incident_ARM_ID')}'\n| sort by TimeGenerated desc",  
                           "timerangetype": "2",  
                           "timerange": {  
                             "relativeTimeRange": "Last 4 hours"  
