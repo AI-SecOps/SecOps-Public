@@ -3,56 +3,44 @@
   "contentVersion": "1.0.0.0",  
   "parameters": {  
     "LogicAppName": {  
-      "defaultValue": "Block_UrlEntity_on_Endpoint",  
+      "defaultValue": "Junk_Suspicious_Emails",  
       "type": "String"  
     },  
     "userAssignedIdentityName": {  
       "defaultValue": "POCs_MI",  
       "type": "String",  
       "metadata": {  
-        "description": "This is the User Assigned Managed Identity with required roles. This identity will be used for managed actions in the workflow."  
+        "description": "The User Assigned Managed Identity for Graph and Log Analytics queries."  
       }  
     },  
     "AzureSentinelAPI": {  
       "defaultValue": "azuresentinel-3",  
       "type": "String",  
       "metadata": {  
-        "description": "This is the working Azure Sentinel API for Entity trigger and posting comments.",  
-        "displayName": "Azure Sentinel API"  
+        "description": "The Azure Sentinel API connection name."  
       }  
     },  
     "LogAnalyticsAPI": {  
       "defaultValue": "azuremonitorlogs",  
       "type": "String",  
       "metadata": {  
-        "description": "This is the working Azure Monitor Logs API for querying log data.",  
-        "displayName": "Azure Monitor Logs API"  
+        "description": "The Log Analytics API connection name."  
       }  
     },  
     "LogAnalyticsWorkspaceName": {  
       "defaultValue": "GoogleLab-Workspace",  
       "type": "String",  
       "metadata": {  
-        "description": "This is the log analytics workspace name where the Sentinel data is stored.",  
-        "displayName": "Log Analytics Workspace Name"  
-      }  
-    },  
-    "notificationEmailRecipients": {  
-      "defaultValue": "test@example.com",  
-      "type": "String",  
-      "metadata": {  
-        "description": "Comma-separated list of email addresses to notify when the incident is created."  
+        "description": "Log Analytics workspace name."  
       }  
     }  
   },  
   "variables": {  
     "resourceGroupLocation": "[resourceGroup().location]",  
     "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",  
-    "logAnalyticsID": "[concat('/subscriptions/', subscription().subscriptionId,'/resourcegroups/', resourceGroup().name,'/providers/microsoft.operationalinsights/workspaces/',parameters('LogAnalyticsWorkspaceName'))]",  
+    "logAnalyticsID": "[concat('/subscriptions/', subscription().subscriptionId, '/resourcegroups/', resourceGroup().name, '/providers/microsoft.operationalinsights/workspaces/', parameters('LogAnalyticsWorkspaceName'))]",  
     "connections_azuresentinel_externalid": "[resourceId('Microsoft.Web/connections/', parameters('AzureSentinelAPI'))]",  
-    "connections_azuremonitorlogs_externalid": "[resourceId('Microsoft.Web/connections/', parameters('LogAnalyticsAPI'))]",  
-    "connections_teams_externalid": "[resourceId('Microsoft.Web/connections/', 'teams')]",  
-    "connections_office365_externalid": "[resourceId('Microsoft.Web/connections/', 'office365')]"  
+    "connections_azuremonitorlogs_externalid": "[resourceId('Microsoft.Web/connections/', parameters('LogAnalyticsAPI'))]"  
   },  
   "resources": [  
     {  
@@ -72,17 +60,13 @@
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",  
           "contentVersion": "1.0.0.0",  
           "parameters": {  
-            "NotificationRecipients": {  
-              "defaultValue": "[parameters('notificationEmailRecipients')]",  
-              "type": "String"  
-            },  
             "$connections": {  
               "defaultValue": {},  
               "type": "Object"  
             }  
           },  
           "triggers": {  
-            "Microsoft_Sentinel_entity": {  
+            "Microsoft_Sentinel_alert": {  
               "type": "ApiConnectionWebhook",  
               "inputs": {  
                 "host": {  
@@ -91,42 +75,25 @@
                   }  
                 },  
                 "body": {  
-                  "callback_url": "@listCallbackUrl()"  
+                  "callback_url": "@{listCallbackUrl()}"  
                 },  
-                "path": "/entity/@{encodeURIComponent('UrlEntity')}"  
+                "path": "/subscribe"  
               }  
             }  
           },  
           "actions": {  
-            "Get_Indicators_List": {  
-              "runAfter": {  
-                "Entity": [  
-                  "Succeeded"  
-                ],  
-                "Incident_ARM_ID": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "Http",  
+            "Filter_MessageId": {  
+              "runAfter": {},  
+              "type": "Query",  
               "inputs": {  
-                "uri": "https://api.securitycenter.microsoft.com/api/indicators",  
-                "method": "GET",  
-                "authentication": {  
-                  "type": "ManagedServiceIdentity",  
-                  "identity": "[variables('userAssignedIdentityId')]",  
-                  "audience": "https://api.securitycenter.windows.com"  
-                }  
-              },  
-              "operationOptions": "DisableAutomaticDecompression",  
-              "runtimeConfiguration": {  
-                "paginationPolicy": {  
-                  "minimumItemCount": 30000  
-                }  
+                "from": "@triggerBody()?['Entities']",  
+                "where": "@equals(item()?['Type'],'mailMessage')"  
               }  
             },  
-            "New_Indicator": {  
+            "For_each_email": {  
+              "foreach": "@body('Filter_MessageId')",  
               "actions": {  
-                "Validate_Url_on_Trusted_list": {  
+                "Run_query_to_get_Email_Details": {  
                   "type": "ApiConnection",  
                   "inputs": {  
                     "host": {  
@@ -136,11 +103,8 @@
                     },  
                     "method": "post",  
                     "body": {  
-                      "query": "let TrustedUrls=_GetWatchlist(\"TrustedEntities\") | where Type=~'Url' | project SearchKey;\nlet UrlIndicator = datatable(Url: string)[\"@{outputs('Entity')}\"];\nUrlIndicator\n| where Url !in(TrustedUrls) \n| count",  
-                      "timerangetype": "2",  
-                      "timerange": {  
-                        "relativeTimeRange": "Last 7 days"  
-                      }  
+                      "query": "let SuspiciousEmails=\nEmailEvents\n| where TimeGenerated > ago(30d)\n| where NetworkMessageId == '@{items('For_each_email')?['NetworkMessageId']}'\n| project TimeGenerated, SenderMailFromAddress, DeliveryAction, DeliveryLocation, Subject, InternetMessageId, NetworkMessageId, RecipientEmailAddress;\nlet SuspiciousSender = SuspiciousEmails | distinct SenderMailFromAddress;\nlet SenderIn90d= \nEmailEvents | where TimeGenerated > ago(90d) \n| where SenderMailFromAddress in~ (SuspiciousSender)\n| summarize SenderFirstSeen=min(TimeGenerated), SenderLastSeen=max(TimeGenerated), EmailCount=dcount(NetworkMessageId), DistinctRecipients=dcount(RecipientEmailAddress) by SenderMailFromAddress\n| extend DaysSeen=datetime_diff('day',SenderLastSeen,SenderFirstSeen);\nSuspiciousEmails\n| lookup kind=leftouter (SenderIn90d) on SenderMailFromAddress\n| lookup (IdentityInfo | summarize arg_max(TimeGenerated,AccountUPN) by RecipientEmailAddress=MailAddress | project-away TimeGenerated) on RecipientEmailAddress\n",  
+                      "timerangetype": "3"  
                     },  
                     "path": "/queryDataV2",  
                     "queries": {  
@@ -151,152 +115,131 @@
                     }  
                   }  
                 },  
-                "Is_Not_Trusted": {  
+                "Get_UserId": {  
+                  "runAfter": {  
+                    "Run_query_to_get_Email_Details": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "Http",  
+                  "inputs": {  
+                    "uri": "https://graph.microsoft.com/v1.0/users/@{body('Run_query_to_get_Email_Details')?['value'][0]?['RecipientEmailAddress']}",  
+                    "method": "GET",  
+                    "authentication": {  
+                      "type": "ManagedServiceIdentity",  
+                      "identity": "[variables('userAssignedIdentityId')]",  
+                      "audience": "https://graph.microsoft.com"  
+                    }  
+                  },  
+                  "runtimeConfiguration": {  
+                    "contentTransfer": {  
+                      "transferMode": "Chunked"  
+                    }  
+                  }  
+                },  
+                "Get_specific_Email_Id": {  
+                  "runAfter": {  
+                    "Get_UserId": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "Http",  
+                  "inputs": {  
+                    "uri": "https://graph.microsoft.com/v1.0/users/@{body('Get_UserId')?['id']}/messages?$filter=subject%20eq%20'@{uriComponent(body('Run_query_to_get_Email_Details')?['value'][0]?['Subject'])}'%20and%20internetMessageId%20eq%20'@{uriComponent(body('Run_query_to_get_Email_Details')?['value'][0]?['InternetMessageId'])}'",  
+                    "method": "GET",  
+                    "authentication": {  
+                      "type": "ManagedServiceIdentity",  
+                      "identity": "[variables('userAssignedIdentityId')]",  
+                      "audience": "https://graph.microsoft.com"  
+                    }  
+                  },  
+                  "runtimeConfiguration": {  
+                    "contentTransfer": {  
+                      "transferMode": "Chunked"  
+                    }  
+                  }  
+                },  
+                "Junk_Email": {  
+                  "runAfter": {  
+                    "Get_specific_Email_Id": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "Http",  
+                  "inputs": {  
+                    "uri": "https://graph.microsoft.com/v1.0/users/@{body('Get_UserId')?['id']}/messages/@{uriComponent(body('Get_specific_Email_Id')?['value'][0]?['id'])}/move",  
+                    "method": "POST",  
+                    "headers": {  
+                      "Content-Type": "application/json"  
+                    },  
+                    "body": {  
+                      "destinationId": "junkemail"  
+                    },  
+                    "authentication": {  
+                      "type": "ManagedServiceIdentity",  
+                      "identity": "[variables('userAssignedIdentityId')]",  
+                      "audience": "https://graph.microsoft.com"  
+                    }  
+                  },  
+                  "runtimeConfiguration": {  
+                    "contentTransfer": {  
+                      "transferMode": "Chunked"  
+                    }  
+                  }  
+                },  
+                "Check_Message": {  
+                  "runAfter": {  
+                    "Junk_Email": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "Http",  
+                  "inputs": {  
+                    "uri": "https://graph.microsoft.com/v1.0/users/@{body('Get_UserId')?['id']}/messages/@{uriComponent(body('Get_specific_Email_Id')?['value'][0]?['id'])}?$select=parentFolderId",  
+                    "method": "GET",  
+                    "authentication": {  
+                      "type": "ManagedServiceIdentity",  
+                      "identity": "[variables('userAssignedIdentityId')]",  
+                      "audience": "https://graph.microsoft.com"  
+                    }  
+                  },  
+                  "runtimeConfiguration": {  
+                    "contentTransfer": {  
+                      "transferMode": "Chunked"  
+                    }  
+                  }  
+                },  
+                "get_Incident_ARMId": {  
+                  "runAfter": {  
+                    "Check_Message": [  
+                      "Failed"  
+                    ]  
+                  },  
+                  "type": "ApiConnection",  
+                  "inputs": {  
+                    "host": {  
+                      "connection": {  
+                        "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"  
+                      }  
+                    },  
+                    "method": "post",  
+                    "body": {  
+                      "query": "SecurityIncident\n| where TimeGenerated > ago(30d)\n| where AlertIds has '@{triggerBody()?['SystemAlertId']}'\n| extend ARM_Id = tostring(split(IncidentUrl, @\"/Microsoft_Azure_Security_Insights/Incident\")[1])\n| distinct ARM_Id, IncidentNumber",  
+                      "timerangetype": "3"  
+                    },  
+                    "path": "/queryDataV2",  
+                    "queries": {  
+                      "subscriptions": "[subscription().subscriptionId]",  
+                      "resourcegroups": "[resourceGroup().name]",  
+                      "resourcetype": "Log Analytics Workspace",  
+                      "resourcename": "[parameters('LogAnalyticsWorkspaceName')]"  
+                    }  
+                  }  
+                },  
+                "For_each_Incident": {  
+                  "foreach": "@body('get_Incident_ARMId')?['value']",  
                   "actions": {  
-                    "Post_adaptive_card_and_wait_for_a_response": {  
-                      "runAfter": {  
-                        "Compose_-_AdaptiveMsg": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "limit": {  
-                        "timeout": "PT4H"  
-                      },  
-                      "type": "ApiConnectionWebhook",  
-                      "inputs": {  
-                        "host": {  
-                          "connection": {  
-                            "name": "@parameters('$connections')['teams']['connectionId']"  
-                          }  
-                        },  
-                        "body": {  
-                          "notificationUrl": "@listCallbackUrl()",  
-                          "body": {  
-                            "messageBody": "@{outputs('Compose_-_AdaptiveMsg')}",  
-                            "updateMessage": "Thanks for your response!",  
-                            "recipient": {  
-                              "groupId": "499bb56b-85ae-47ea-ac9a-07172f3fa3c7",  
-                              "channelId": "19:jl_MC6XLQVFZIyzR1a4YxmE6LedhiSCNEetQCqnHqZ41@thread.tacv2"  
-                            }  
-                          }  
-                        },  
-                        "path": "/v1.0/teams/conversation/gatherinput/poster/Flow bot/location/@{encodeURIComponent('Channel')}/$subscriptions"  
-                      }  
-                    },  
-                    "Is_Approved": {  
-                      "actions": {},  
-                      "runAfter": {  
-                        "Post_adaptive_card_and_wait_for_a_response": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "else": {  
-                        "actions": {  
-                          "Send_an_email_-_denied": {  
-                            "type": "ApiConnection",  
-                            "inputs": {  
-                              "host": {  
-                                "connection": {  
-                                  "name": "@parameters('$connections')['office365']['connectionId']"  
-                                }  
-                              },  
-                              "method": "post",  
-                              "body": {  
-                                "To": "@parameters('NotificationRecipients')",  
-                                "Subject": "IOC Blocking DENIED by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']} |  Url",  
-                                "Body": "<p class=\"editor-paragraph\">IOC Blocking for Url @{outputs('Entity')} was DENIED by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}.</p><br><p class=\"editor-paragraph\">Incident Number: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}</p><p class=\"editor-paragraph\">Requested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</p><br><p class=\"editor-paragraph\">Denied by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}<br>Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}</p>"  
-                              },  
-                              "path": "/v2/Mail"  
-                            }  
-                          }  
-                        }  
-                      },  
-                      "expression": {  
-                        "and": [  
-                          {  
-                            "equals": [  
-                              "@body('Post_adaptive_card_and_wait_for_a_response')?['data']?['approvalResponse']",  
-                              "approved"  
-                            ]  
-                          }  
-                        ]  
-                      },  
-                      "type": "If"  
-                    },  
-                    "Get_InitiatedBy": {  
-                      "type": "ApiConnection",  
-                      "inputs": {  
-                        "host": {  
-                          "connection": {  
-                            "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"  
-                          }  
-                        },  
-                        "method": "post",  
-                        "body": {  
-                          "query": "SentinelHealth\n| where TimeGenerated > ago(4h)\n| where SentinelResourceName == 'Block_FileHash_on_Endpoint'\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ '@{outputs('Incident_ARM_ID')}'\n| sort by TimeGenerated desc",  
-                          "timerangetype": "2",  
-                          "timerange": {  
-                            "relativeTimeRange": "Last 4 hours"  
-                          }  
-                        },  
-                        "path": "/queryDataV2",  
-                        "queries": {  
-                          "subscriptions": "[subscription().subscriptionId]",  
-                          "resourcegroups": "[resourceGroup().name]",  
-                          "resourcetype": "Log Analytics Workspace",  
-                          "resourcename": "[parameters('LogAnalyticsWorkspaceName')]"  
-                        }  
-                      }  
-                    },  
-                    "HTTP_-_Url-_block": {  
-                      "runAfter": {  
-                        "Get_InitiatedBy": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "type": "Http",  
-                      "inputs": {  
-                        "uri": "https://api.securitycenter.microsoft.com/api/indicators",  
-                        "method": "POST",  
-                        "body": {  
-                          "indicatorValue": "@{outputs('Entity')}",  
-                          "indicatorType": "Url",  
-                          "title": "Playbook - Incident @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} - @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}",  
-                          "application": "[parameters('LogicAppName')]",  
-                          "expirationTime": "@{addDays(utcNow(), 60)}",  
-                          "action": "Block",  
-                          "severity": "Medium",  
-                          "description": "Playbook - Incident @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} - @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}",  
-                          "recommendedActions": "preApproved",  
-                          "generateAlert": true  
-                        },  
-                        "authentication": {  
-                          "type": "ManagedServiceIdentity",  
-                          "identity": "[variables('userAssignedIdentityId')]",  
-                          "audience": "https://api.securitycenter.windows.com"  
-                        }  
-                      },  
-                      "runtimeConfiguration": {  
-                        "contentTransfer": {  
-                          "transferMode": "Chunked"  
-                        }  
-                      }  
-                    },  
-                    "Compose_-_Comments": {  
-                      "runAfter": {  
-                        "HTTP_-_Url-_block": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "type": "Compose",  
-                      "inputs": "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <style>\n    body {\n      font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;\n      background-color: #ffffff;\n      color: #333;\n    }\n    .container {\n      padding: 20px;\n      border: 1px solid #ddd;\n      border-radius: 6px;\n    }\n    .header {\n      font-size: 18px;\n      font-weight: bold;\n      color: #2e6c80;\n      margin-bottom: 10px;\n    }\n    .section-title {\n      font-weight: bold;\n      margin-top: 20px;\n      margin-bottom: 10px;\n    }\n    .details {\n      background-color: #f4f4f4;\n      padding: 15px;\n      border-radius: 5px;\n    }\n    .detail-item {\n      margin-bottom: 10px;\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">URL Blocked via MDE Indicator</div>\n\n    <p>The following URL has been successfully added to the Microsoft Defender for Endpoint (MDE) Indicator list with the action set to <strong>Block</strong>:</p>\n\n    <div class=\"details\">\n      <div class=\"detail-item\"><strong>URL:</strong> @{outputs('Entity')}</div>\n    </div>\n\n    <div class=\"section-title\">Incident Details:</div>\n    <div class=\"details\">\n      <div class=\"detail-item\"><strong>Incident Number:</strong> @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}</div>\n      <div class=\"detail-item\"><strong>Initiated By:</strong> @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</div>\n    </div>\n\n    <p>If you have any questions or require further assistance, please contact the security operations team.</p>\n  </div>\n</body>\n</html>\n"  
-                    },  
                     "Add_comment_to_incident_(V3)": {  
-                      "runAfter": {  
-                        "Compose_-_Comments": [  
-                          "Succeeded"  
-                        ]  
-                      },  
                       "type": "ApiConnection",  
                       "inputs": {  
                         "host": {  
@@ -306,206 +249,27 @@
                         },  
                         "method": "post",  
                         "body": {  
-                          "incidentArmId": "@triggerBody()?['IncidentArmID']",  
-                          "message": "<p class=\"editor-paragraph\">@{outputs('Compose_-_Comments')}</p>"  
+                          "incidentArmId": "@items('For_each_Incident')?['ARM_Id']",  
+                          "message": "<p class=\"editor-paragraph\">[Analyst Action] The email from AlertId '@{triggerBody()?['SystemAlertId']}' was moved to junk folder on user's mailbox '@{body('Run_query_to_get_Email_Details')?['value'][0]?['RecipientEmailAddress']}' due to potential phishing incident with the following details:</p><br><p class=\"editor-paragraph\">Email Subject: @{body('Run_query_to_get_Email_Details')?['value'][0]?['Subject']}</p><p class=\"editor-paragraph\">Email Sender: @{body('Run_query_to_get_Email_Details')?['value'][0]?['SenderMailFromAddress']}</p><p class=\"editor-paragraph\">Sender First Seen in 90 days: @{body('Run_query_to_get_Email_Details')?['value'][0]?['SenderFirstSeen']}</p>"  
                         },  
                         "path": "/Incidents/Comment"  
-                      }  
-                    },  
-                    "Send_an_email_-_approved": {  
-                      "runAfter": {  
-                        "Add_comment_to_incident_(V3)": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "type": "ApiConnection",  
-                      "inputs": {  
-                        "host": {  
-                          "connection": {  
-                            "name": "@parameters('$connections')['office365']['connectionId']"  
-                          }  
-                        },  
-                        "method": "post",  
-                        "body": {  
-                          "To": "@parameters('NotificationRecipients')",  
-                          "Subject": "IOC Block Action Initiated by @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']} | IUrl: @{outputs('Entity')}",  
-                          "Body": "<p class=\"editor-paragraph\">@{outputs('Compose_-_Comments')}</p>"  
-                        },  
-                        "path": "/v2/Mail"  
-                      }  
-                    },  
-                    "Compose_-_AdaptiveMsg": {  
-                      "runAfter": {  
-                        "Get_InitiatedBy": [  
-                          "Skipped"  
-                        ]  
-                      },  
-                      "type": "Compose",  
-                      "inputs": {  
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",  
-                        "version": "1.2",  
-                        "type": "AdaptiveCard",  
-                        "body": [  
-                          {  
-                            "type": "TextBlock",  
-                            "text": "IOC Blocking Approval Request",  
-                            "weight": "Bolder",  
-                            "size": "Medium"  
-                          },  
-                          {  
-                            "type": "TextBlock",  
-                            "text": "Please review the IOC for blocking below and provide decision .You may include additional comments as needed.",  
-                            "wrap": true  
-                          },  
-                          {  
-                            "type": "TextBlock",  
-                            "text": "IOC: @{outputs('Entity')}",  
-                            "wrap": true  
-                          },  
-                          {  
-                            "type": "TextBlock",  
-                            "text": "[View Related Incident](https://portal.azure.com/#view/Microsoft_Azure_Security_Insights/IncidentPage.ReactView/incidentArmId/@{encodeUriComponent(outputs('Incident_ARM_ID'))})",  
-                            "wrap": true,  
-                            "color": "Accent",  
-                            "spacing": "Medium"  
-                          },  
-                          {  
-                            "type": "Input.Text",  
-                            "id": "comment",  
-                            "placeholder": "Enter your comment here...",  
-                            "isMultiline": true  
-                          }  
-                        ],  
-                        "actions": [  
-                          {  
-                            "type": "Action.Submit",  
-                            "title": "Approve",  
-                            "data": {  
-                              "approvalResponse": "approved"  
-                            }  
-                          },  
-                          {  
-                            "type": "Action.Submit",  
-                            "title": "Reject",  
-                            "data": {  
-                              "approvalResponse": "rejected"  
-                            }  
-                          }  
-                        ]  
                       }  
                     }  
                   },  
                   "runAfter": {  
-                    "Validate_Url_on_Trusted_list": [  
+                    "get_Incident_ARMId": [  
                       "Succeeded"  
                     ]  
                   },  
-                  "else": {  
-                    "actions": {  
-                      "Add_incident_comment2-copy": {  
-                        "type": "ApiConnection",  
-                        "inputs": {  
-                          "host": {  
-                            "connection": {  
-                              "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
-                            }  
-                          },  
-                          "method": "post",  
-                          "body": {  
-                            "incidentArmId": "@triggerBody()?['IncidentArmID']",  
-                            "message": "<p class=\"editor-paragraph\">@{outputs('Entity')} is a trusted entity. Blocking actions against this entity are not permitted.</p>"  
-                          },  
-                          "path": "/Incidents/Comment"  
-                        }  
-                      }  
-                    }  
-                  },  
-                  "expression": {  
-                    "and": [  
-                      {  
-                        "greater": [  
-                          "@body('Validate_Url_on_Trusted_list')?['value'][0]?['Count']",  
-                          0  
-                        ]  
-                      }  
-                    ]  
-                  },  
-                  "type": "If"  
+                  "type": "Foreach"  
                 }  
               },  
               "runAfter": {  
-                "Filter_array": [  
+                "Filter_MessageId": [  
                   "Succeeded"  
                 ]  
               },  
-              "else": {  
-                "actions": {  
-                  "Add_incident_comment1": {  
-                    "type": "ApiConnection",  
-                    "inputs": {  
-                      "host": {  
-                        "connection": {  
-                          "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
-                        }  
-                      },  
-                      "method": "post",  
-                      "body": {  
-                        "incidentArmId": "@triggerBody()?['IncidentArmID']",  
-                        "message": "<p class=\"editor-paragraph\">@{outputs('Entity')} already exist in MDE Indicator list with the action set to <b><strong class=\"editor-text-bold\">block</strong></b>.</p>"  
-                      },  
-                      "path": "/Incidents/Comment"  
-                    }  
-                  }  
-                }  
-              },  
-              "expression": {  
-                "and": [  
-                  {  
-                    "equals": [  
-                      "@length(body('Filter_array'))",  
-                      0  
-                    ]  
-                  }  
-                ]  
-              },  
-              "type": "If"  
-            },  
-            "Select_Value_Field": {  
-              "runAfter": {  
-                "Get_Indicators_List": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "Select",  
-              "inputs": {  
-                "from": "@body('Get_Indicators_List')?['value']",  
-                "select": {  
-                  "indicatorValue": "@item()['indicatorValue']",  
-                  "indicatorType": "@item()['indicatorType']"  
-                }  
-              }  
-            },  
-            "Filter_array": {  
-              "runAfter": {  
-                "Select_Value_Field": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "Query",  
-              "inputs": {  
-                "from": "@body('Select_Value_Field')",  
-                "where": "@contains(item()['indicatorValue'],outputs('Entity'))"  
-              }  
-            },  
-            "Entity": {  
-              "runAfter": {},  
-              "type": "Compose",  
-              "inputs": "@triggerBody()?['Entity']?['properties']?['Url']"  
-            },  
-            "Incident_ARM_ID": {  
-              "runAfter": {},  
-              "type": "Compose",  
-              "inputs": "@triggerBody()?['IncidentArmID']"  
+              "type": "Foreach"  
             }  
           },  
           "outputs": {}  
@@ -534,71 +298,15 @@
                     "type": "ManagedServiceIdentity"  
                   }  
                 }  
-              },  
-              "teams": {  
-                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'teams')]",  
-                "connectionId": "[variables('connections_teams_externalid')]",  
-                "connectionName": "teams"  
-              },  
-              "office365": {  
-                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]",  
-                "connectionId": "[variables('connections_office365_externalid')]",  
-                "connectionName": "office365"  
               }  
             }  
           }  
         }  
       }  
-    },  
-    {  
-      "type": "Microsoft.Web/connections",  
-      "apiVersion": "2016-06-01",  
-      "name": "office365",  
-      "location": "[variables('resourceGroupLocation')]",  
-      "kind": "V1",  
-      "properties": {  
-        "displayName": "office365",  
-        "customParameterValues": {},  
-        "api": {  
-          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]"  
-        }  
-      }  
-    },  
-    {  
-      "type": "Microsoft.Web/connections",  
-      "apiVersion": "2016-06-01",  
-      "name": "teams",  
-      "location": "[variables('resourceGroupLocation')]",  
-      "kind": "V1",  
-      "properties": {  
-        "displayName": "teams",  
-        "customParameterValues": {},  
-        "api": {  
-          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'teams')]"  
-        }  
-      }  
-    },  
-    {  
-      "type": "Microsoft.Web/connections",  
-      "apiVersion": "2016-06-01",  
-      "name": "[parameters('LogAnalyticsAPI')]",  
-      "location": "[variables('resourceGroupLocation')]",  
-      "kind": "V1",  
-      "properties": {  
-        "displayName": "[parameters('LogAnalyticsAPI')]",  
-        "customParameterValues": {},  
-        "api": {  
-          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('LogAnalyticsAPI'))]"  
-        },  
-        "parameterValueSet": {  
-          "username": "[reference(variables('logAnalyticsID'), '2015-03-20').customerId]",  
-          "password": "[listKeys(variables('logAnalyticsID'), '2015-03-20').primarySharedKey]"  
-        }  
-      }  
     }  
   ],  
   "metadata": {  
-    "description": "This ARM template deploys an Azure Logic App to orchestrate automatic blocking of UrlEntity indicators in Microsoft Defender for Endpoint, with approval and notification via Teams and Office365, and full Sentinel and Log Analytics integration. Enables one-click 'Deploy to Azure'."  
+    "description": "Deploys a Logic App that, in response to Sentinel alerts containing suspicious email messages, queries details from Log Analytics, takes Graph actions to move email to Junk, and posts the analyst action to incident comments. Requires user-assigned identity with Microsoft Graph and Log Analytics access."  
   },  
   "outputs": {  
     "logicAppResourceId": {  
