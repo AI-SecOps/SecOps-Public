@@ -216,7 +216,7 @@
                                                 },
                                                 "method": "post",
                                                 "body": {
-                                                    "To": "[parameters('NotificationRecipients')]",
+                                                    "To": "@parameters('NotificationRecipients')",
                                                     "Subject": "IOC Blocking Approved by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']} |  @{body('Get_Info_FileHash_from_Alert')?['value']?['FileName']}",
                                                     "Body": "<p class=\"editor-paragraph\">The below file has been <b><strong class=\"editor-text-bold\">added </strong></b>to <b><strong class=\"editor-text-bold\">MDE Indicator list</strong></b> with the action set to <b><strong class=\"editor-text-bold\">block</strong></b>.<br><br>FileHash: @{body('Get_Info_FileHash_from_Alert')?['value']?['SHA256']}<br>FileName: @{body('Get_Info_FileHash_from_Alert')?['value']?['FileName']}<br>FolderPath: @{body('Get_Info_FileHash_from_Alert')?['value']?['Directory']}<br><br><br>IncidentNumber: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}<br>Requested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}<br>===================<br>Approved by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}<br>Approver Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}</p>"
                                                 },
@@ -279,7 +279,7 @@
                                                     },
                                                     "method": "post",
                                                     "body": {
-                                                        "To": "[parameters('NotificationRecipients')]",
+                                                        "To": "@parameters('NotificationRecipients')",
                                                         "Subject": "IOC Blocking DENIED by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']} |   @{triggerBody()?['Entity']?['properties']?['Value']}",
                                                         "Body": "<p class=\"editor-paragraph\">The below file was <b><strong class=\"editor-text-bold\">not added </strong></b>to MDE Indicator list with the action set to <b><strong class=\"editor-text-bold\">block</strong></b>.<br><br>FileHash: @{body('Get_Info_FileHash_from_Alert')?['value']?['SHA256']}<br>FileName: @{body('Get_Info_FileHash_from_Alert')?['value']?['FileName']}<br>FolderPath: @{body('Get_Info_FileHash_from_Alert')?['value']?['Directory']}</p><br><br><p class=\"editor-paragraph\">IncidentNumber: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} <br>Requested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</p><p class=\"editor-paragraph\"><br>===================</p><br><p class=\"editor-paragraph\">Denied by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}<br>Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}</p>"
                                                     },
