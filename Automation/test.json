@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",  
   "parameters": {  
     "LogicAppName": {  
-      "defaultValue": "Block_IP_on_Endpoint",  
+      "defaultValue": "Block_UrlEntity_on_Endpoint",  
       "type": "String"  
     },  
     "userAssignedIdentityName": {  
@@ -93,7 +93,7 @@
                 "body": {  
                   "callback_url": "@listCallbackUrl()"  
                 },  
-                "path": "/entity/@{encodeURIComponent('IP')}"  
+                "path": "/entity/@{encodeURIComponent('UrlEntity')}"  
               }  
             }  
           },  
@@ -126,7 +126,7 @@
             },  
             "New_Indicator": {  
               "actions": {  
-                "Validate_IP_on_Trusted_list": {  
+                "Validate_Url_on_Trusted_list": {  
                   "type": "ApiConnection",  
                   "inputs": {  
                     "host": {  
@@ -136,7 +136,7 @@
                     },  
                     "method": "post",  
                     "body": {  
-                      "query": "let TrustedIPs=_GetWatchlist(\"SAPS_TrustedEntities\") | where Type=~'IPAddress' | project SearchKey;\nlet TrustedSubnets=_GetWatchlist(\"SAPS_TrustedEntities\") | where Type=~'CIDR' | summarize Subnets = make_list(SearchKey);\nlet IPIndicator = datatable(IPAddress: string)[\"@{outputs('Entity')}\"];\nIPIndicator\n| where not(ipv4_is_private(IPAddress))\n| where IPAddress !in(TrustedIPs) \n| where not(ipv4_is_in_any_range(IPAddress, toscalar(TrustedSubnets)))\n| count",  
+                      "query": "let TrustedUrls=_GetWatchlist(\"TrustedEntities\") | where Type=~'Url' | project SearchKey;\nlet UrlIndicator = datatable(Url: string)[\"@{outputs('Entity')}\"];\nUrlIndicator\n| where Url !in(TrustedUrls) \n| count",  
                       "timerangetype": "2",  
                       "timerange": {  
                         "relativeTimeRange": "Last 7 days"  
@@ -184,45 +184,7 @@
                       }  
                     },  
                     "Is_Approved": {  
-                      "actions": {  
-                        "Send_an_email_-_approved": {  
-                          "runAfter": {  
-                            "Compose_-_IP_BLock": [  
-                              "Succeeded"  
-                            ]  
-                          },  
-                          "type": "ApiConnection",  
-                          "inputs": {  
-                            "host": {  
-                              "connection": {  
-                                "name": "@parameters('$connections')['office365']['connectionId']"  
-                              }  
-                            },  
-                            "method": "post",  
-                            "body": {  
-                              "To": "@parameters('NotificationRecipients')",  
-                              "Subject": "IOC Blocking Approved by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']} |  @{outputs('Entity')}",  
-                              "Body": "<p class=\"editor-paragraph\">The IP Address @{outputs('Entity')} has been added to MDE Indicator list with the action set to block.</p><br><p class=\"editor-paragraph\">Incident Number: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}<br>Requested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</p><br><p class=\"editor-paragraph\">Approved by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}<br>Approver Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}</p>"  
-                            },  
-                            "path": "/v2/Mail"  
-                          }  
-                        },  
-                        "Compose_-_IP_BLock": {  
-                          "type": "Compose",  
-                          "inputs": {  
-                            "indicatorValue": "@{outputs('Entity')}",  
-                            "indicatorType": "IpAddress",  
-                            "title": "Playbook - Incident @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} - @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']} ",  
-                            "application": "[parameters('LogicAppName')]",  
-                            "expirationTime": "@addDays(utcNow(), 30)",  
-                            "action": "Block",  
-                            "severity": "Medium",  
-                            "description": "Approved by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}, Comment: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}",  
-                            "recommendedActions": "Approved",  
-                            "GenerateAlert": "True"  
-                          }  
-                        }  
-                      },  
+                      "actions": {},  
                       "runAfter": {  
                         "Post_adaptive_card_and_wait_for_a_response": [  
                           "Succeeded"  
@@ -241,8 +203,8 @@
                               "method": "post",  
                               "body": {  
                                 "To": "@parameters('NotificationRecipients')",  
-                                "Subject": "IOC Blocking DENIED by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']} |   @{outputs('Entity')}",  
-                                "Body": "<p class=\"editor-paragraph\">The IP Address @{outputs('Entity')} was not added in MDE Indicator list.</p><br><p class=\"editor-paragraph\">Incident Number: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}</p><p class=\"editor-paragraph\">Requested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</p><br><p class=\"editor-paragraph\">Denied by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}<br>Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}</p>"  
+                                "Subject": "IOC Blocking DENIED by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']} |  Url",  
+                                "Body": "<p class=\"editor-paragraph\">IOC Blocking for Url @{outputs('Entity')} was DENIED by @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}.</p><br><p class=\"editor-paragraph\">Incident Number: @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}</p><p class=\"editor-paragraph\">Requested by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</p><br><p class=\"editor-paragraph\">Denied by: @{body('Post_adaptive_card_and_wait_for_a_response')?['responder']?['displayName']}<br>Comments: @{body('Post_adaptive_card_and_wait_for_a_response')?['data']?['comment']}</p>"  
                               },  
                               "path": "/v2/Mail"  
                             }  
@@ -271,7 +233,7 @@
                         },  
                         "method": "post",  
                         "body": {  
-                          "query": "[concat('SentinelHealth\n| where TimeGenerated > ago(4h)\n| where SentinelResourceName == ''', parameters('LogicAppName'), '''\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ ''@{outputs(''Incident_ARM_ID'')}''\n| sort by TimeGenerated desc')]",  
+                          "query": "SentinelHealth\n| where TimeGenerated > ago(4h)\n| where SentinelResourceName == 'Block_FileHash_on_Endpoint'\n| project TimeGenerated, SentinelResourceName, TriggeredBy = tostring(ExtendedProperties.TriggeredByName.UserPrincipalName), IncidentNumber =  toint(ExtendedProperties.IncidentNumber), IncidentArmId =  tostring(ExtendedProperties.IncidentArmId)\n| where IncidentArmId =~ '@{outputs(''Incident_ARM_ID'')}'\n| sort by TimeGenerated desc",  
                           "timerangetype": "2",  
                           "timerange": {  
                             "relativeTimeRange": "Last 4 hours"  
@@ -286,7 +248,7 @@
                         }  
                       }  
                     },  
-                    "HTTP_-_IP-_block": {  
+                    "HTTP_-_Url-_block": {  
                       "runAfter": {  
                         "Get_InitiatedBy": [  
                           "Succeeded"  
@@ -298,15 +260,15 @@
                         "method": "POST",  
                         "body": {  
                           "indicatorValue": "@{outputs('Entity')}",  
-                          "indicatorType": "IpAddress",  
+                          "indicatorType": "Url",  
                           "title": "Playbook - Incident @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} - @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}",  
                           "application": "[parameters('LogicAppName')]",  
-                          "expirationTime": "@addDays(utcNow(), 30)",  
+                          "expirationTime": "@{addDays(utcNow(), 60)}",  
                           "action": "Block",  
                           "severity": "Medium",  
                           "description": "Playbook - Incident @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']} - @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}",  
-                          "recommendedActions": "pre-Approved",  
-                          "GenerateAlert": "True"  
+                          "recommendedActions": "preApproved",  
+                          "generateAlert": true  
                         },  
                         "authentication": {  
                           "type": "ManagedServiceIdentity",  
@@ -320,9 +282,18 @@
                         }  
                       }  
                     },  
-                    "Add_incident_comment": {  
+                    "Compose_-_Comments": {  
                       "runAfter": {  
-                        "HTTP_-_IP-_block": [  
+                        "HTTP_-_Url-_block": [  
+                          "Succeeded"  
+                        ]  
+                      },  
+                      "type": "Compose",  
+                      "inputs": "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <style>\n    body {\n      font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;\n      background-color: #ffffff;\n      color: #333;\n    }\n    .container {\n      padding: 20px;\n      border: 1px solid #ddd;\n      border-radius: 6px;\n    }\n    .header {\n      font-size: 18px;\n      font-weight: bold;\n      color: #2e6c80;\n      margin-bottom: 10px;\n    }\n    .section-title {\n      font-weight: bold;\n      margin-top: 20px;\n      margin-bottom: 10px;\n    }\n    .details {\n      background-color: #f4f4f4;\n      padding: 15px;\n      border-radius: 5px;\n    }\n    .detail-item {\n      margin-bottom: 10px;\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">URL Blocked via MDE Indicator</div>\n\n    <p>The following URL has been successfully added to the Microsoft Defender for Endpoint (MDE) Indicator list with the action set to <strong>Block</strong>:</p>\n\n    <div class=\"details\">\n      <div class=\"detail-item\"><strong>URL:</strong> @{outputs('Entity')}</div>\n    </div>\n\n    <div class=\"section-title\">Incident Details:</div>\n    <div class=\"details\">\n      <div class=\"detail-item\"><strong>Incident Number:</strong> @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}</div>\n      <div class=\"detail-item\"><strong>Initiated By:</strong> @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</div>\n    </div>\n\n    <p>If you have any questions or require further assistance, please contact the security operations team.</p>\n  </div>\n</body>\n</html>\n"  
+                    },  
+                    "Add_comment_to_incident_(V3)": {  
+                      "runAfter": {  
+                        "Compose_-_Comments": [  
                           "Succeeded"  
                         ]  
                       },  
@@ -336,14 +307,14 @@
                         "method": "post",  
                         "body": {  
                           "incidentArmId": "@triggerBody()?['IncidentArmID']",  
-                          "message": "<p class=\"editor-paragraph\">@{outputs('Entity')} has been added to MDE Indicator list with the action set to <b><strong class=\"editor-text-bold\">block</strong></b>.</p><br><p class=\"editor-paragraph\">Initiated by: @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</p><br>"  
+                          "message": "<p class=\"editor-paragraph\">@{outputs('Compose_-_Comments')}</p>"  
                         },  
                         "path": "/Incidents/Comment"  
                       }  
                     },  
-                    "Send_a_notification": {  
+                    "Send_an_email_-_approved": {  
                       "runAfter": {  
-                        "Add_incident_comment": [  
+                        "Add_comment_to_incident_(V3)": [  
                           "Succeeded"  
                         ]  
                       },  
@@ -357,8 +328,8 @@
                         "method": "post",  
                         "body": {  
                           "To": "@parameters('NotificationRecipients')",  
-                          "Subject": "IOC Block Action Initiated by @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']} | IP: @{outputs('Entity')}",  
-                          "Body": "<style>\n    body { font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif; background-color: #ffffff; color: #333; }\n    .container { padding: 20px; border: 1px solid #ddd; border-radius: 6px; }\n    .header { font-size: 18px; font-weight: bold; color: #2e6c80; margin-bottom: 10px; }\n    .section-title { font-weight: bold; margin-top: 20px; margin-bottom: 10px; }\n    .details { background-color: #f4f4f4; padding: 15px; border-radius: 5px; }\n    .detail-item { margin-bottom: 10px; }\n  </style>\n\n  <div class=\"container\">\n    <div class=\"header\">IP Address Blocked via MDE Indicator</div>\n\n    <p>The following action has been successfully executed using Microsoft Defender for Endpoint:</p>\n\n    <div class=\"details\">\n      <div class=\"detail-item\">\n        🚫 The IP address <strong>@{outputs('Entity')}</strong> has been added to the MDE Indicator list with the action set to <strong>Block</strong>.\n      </div>\n    </div>\n\n    <div class=\"section-title\">Incident Details:</div>\n    <div class=\"details\">\n      <div class=\"detail-item\"><strong>Incident Number:</strong> @{first(body('Get_InitiatedBy')?['value'])['IncidentNumber']}</div>\n      <div class=\"detail-item\"><strong>Initiated By:</strong> @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']}</div>\n    </div>\n\n    <p>If you have any questions or require further assistance, please contact the security operations team.</p>\n  </div>\n"  
+                          "Subject": "IOC Block Action Initiated by @{first(body('Get_InitiatedBy')?['value'])['TriggeredBy']} | IUrl: @{outputs('Entity')}",  
+                          "Body": "<p class=\"editor-paragraph\">@{outputs('Compose_-_Comments')}</p>"  
                         },  
                         "path": "/v2/Mail"  
                       }  
@@ -393,7 +364,7 @@
                           },  
                           {  
                             "type": "TextBlock",  
-                            "text": "[View Related Incident](https://portal.azure.com/#view/Microsoft_Azure_Security_Insights/IncidentPage.ReactView/incidentArmId/@{encodeUriComponent(triggerBody()?['IncidentArmID'])})",  
+                            "text": "[View Related Incident](https://portal.azure.com/#view/Microsoft_Azure_Security_Insights/IncidentPage.ReactView/incidentArmId/@{encodeUriComponent(outputs('Incident_ARM_ID'))})",  
                             "wrap": true,  
                             "color": "Accent",  
                             "spacing": "Medium"  
@@ -425,13 +396,13 @@
                     }  
                   },  
                   "runAfter": {  
-                    "Validate_IP_on_Trusted_list": [  
+                    "Validate_Url_on_Trusted_list": [  
                       "Succeeded"  
                     ]  
                   },  
                   "else": {  
                     "actions": {  
-                      "Add_incident_comment2": {  
+                      "Add_incident_comment2-copy": {  
                         "type": "ApiConnection",  
                         "inputs": {  
                           "host": {  
@@ -453,7 +424,7 @@
                     "and": [  
                       {  
                         "greater": [  
-                          "@body('Validate_IP_on_Trusted_list')?['value'][0]?['Count']",  
+                          "@body('Validate_Url_on_Trusted_list')?['value'][0]?['Count']",  
                           0  
                         ]  
                       }  
@@ -529,7 +500,7 @@
             "Entity": {  
               "runAfter": {},  
               "type": "Compose",  
-              "inputs": "@triggerBody()?['Entity']?['properties']?['Address']"  
+              "inputs": "@triggerBody()?['Entity']?['properties']?['Url']"  
             },  
             "Incident_ARM_ID": {  
               "runAfter": {},  
@@ -627,7 +598,7 @@
     }  
   ],  
   "metadata": {  
-    "description": "This ARM template deploys an Azure Logic App to orchestrate automatic blocking of IP addresses in Microsoft Defender for Endpoint, with approval and notification via Teams and Office365, and full Sentinel and Log Analytics integration. Enables one-click 'Deploy to Azure'."  
+    "description": "This ARM template deploys an Azure Logic App to orchestrate automatic blocking of UrlEntity indicators in Microsoft Defender for Endpoint, with approval and notification via Teams and Office365, and full Sentinel and Log Analytics integration. Enables one-click 'Deploy to Azure'."  
   },  
   "outputs": {  
     "logicAppResourceId": {  
