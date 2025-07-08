@@ -3,28 +3,28 @@
   "contentVersion": "1.0.0.0",  
   "parameters": {  
     "LogicAppName": {  
-      "defaultValue": "Junk_Suspicious_Emails",  
+      "defaultValue": "ResetPasswordSessionRevoke",  
       "type": "String"  
     },  
     "userAssignedIdentityName": {  
       "defaultValue": "POCs_MI",  
       "type": "String",  
       "metadata": {  
-        "description": "The User Assigned Managed Identity for Graph and Log Analytics queries."  
+        "description": "User Assigned Managed Identity for Security Identity Responder"  
       }  
     },  
     "AzureSentinelAPI": {  
       "defaultValue": "azuresentinel-3",  
       "type": "String",  
       "metadata": {  
-        "description": "The Azure Sentinel API connection name."  
+        "description": "Azure Sentinel API connection name."  
       }  
     },  
     "LogAnalyticsAPI": {  
       "defaultValue": "azuremonitorlogs",  
       "type": "String",  
       "metadata": {  
-        "description": "The Log Analytics API connection name."  
+        "description": "Azure Monitor Logs API connection name."  
       }  
     },  
     "LogAnalyticsWorkspaceName": {  
@@ -33,6 +33,20 @@
       "metadata": {  
         "description": "Log Analytics workspace name."  
       }  
+    },  
+    "notificationEmailRecipients": {  
+      "defaultValue": "test@example.com",  
+      "type": "String",  
+      "metadata": {  
+        "description": "Recipients for notifications."  
+      }  
+    },  
+    "GroupID": {  
+      "type": "string",  
+      "defaultValue": "",  
+      "metadata": {  
+        "description": "Azure AD Group ID for containment."  
+      }  
     }  
   },  
   "variables": {  
@@ -40,7 +54,8 @@
     "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",  
     "logAnalyticsID": "[concat('/subscriptions/', subscription().subscriptionId, '/resourcegroups/', resourceGroup().name, '/providers/microsoft.operationalinsights/workspaces/', parameters('LogAnalyticsWorkspaceName'))]",  
     "connections_azuresentinel_externalid": "[resourceId('Microsoft.Web/connections/', parameters('AzureSentinelAPI'))]",  
-    "connections_azuremonitorlogs_externalid": "[resourceId('Microsoft.Web/connections/', parameters('LogAnalyticsAPI'))]"  
+    "connections_azuremonitorlogs_externalid": "[resourceId('Microsoft.Web/connections/', parameters('LogAnalyticsAPI'))]",  
+    "connections_office365_externalid": "[resourceId('Microsoft.Web/connections/', 'office365')]"  
   },  
   "resources": [  
     {  
@@ -60,13 +75,21 @@
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",  
           "contentVersion": "1.0.0.0",  
           "parameters": {  
+            "group-id": {  
+              "defaultValue": "[parameters('GroupID')]",  
+              "type": "String"  
+            },  
+            "NotificationRecipients": {  
+              "defaultValue": "[parameters('notificationEmailRecipients')]",  
+              "type": "String"  
+            },  
             "$connections": {  
               "defaultValue": {},  
               "type": "Object"  
             }  
           },  
           "triggers": {  
-            "Microsoft_Sentinel_alert": {  
+            "Microsoft_Sentinel_entity": {  
               "type": "ApiConnectionWebhook",  
               "inputs": {  
                 "host": {  
@@ -77,199 +100,210 @@
                 "body": {  
                   "callback_url": "@{listCallbackUrl()}"  
                 },  
-                "path": "/subscribe"  
+                "path": "/entity/@{encodeURIComponent('Account')}"  
               }  
             }  
           },  
           "actions": {  
-            "Filter_MessageId": {  
+            "Initialize_ActionsTaken": {  
               "runAfter": {},  
-              "type": "Query",  
+              "type": "InitializeVariable",  
               "inputs": {  
-                "from": "@triggerBody()?['Entities']",  
-                "where": "@equals(item()?['Type'],'mailMessage')"  
+                "variables": [  
+                  {  
+                    "name": "ActionsTaken",  
+                    "type": "array",  
+                    "value": []  
+                  }  
+                ]  
               }  
             },  
-            "For_each_email": {  
-              "foreach": "@body('Filter_MessageId')",  
-              "actions": {  
-                "Run_query_to_get_Email_Details": {  
-                  "type": "ApiConnection",  
-                  "inputs": {  
-                    "host": {  
-                      "connection": {  
-                        "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"  
-                      }  
-                    },  
-                    "method": "post",  
-                    "body": {  
-                      "query": "let SuspiciousEmails=\nEmailEvents\n| where TimeGenerated > ago(30d)\n| where NetworkMessageId == '@{items('For_each_email')?['NetworkMessageId']}'\n| project TimeGenerated, SenderMailFromAddress, DeliveryAction, DeliveryLocation, Subject, InternetMessageId, NetworkMessageId, RecipientEmailAddress;\nlet SuspiciousSender = SuspiciousEmails | distinct SenderMailFromAddress;\nlet SenderIn90d= \nEmailEvents | where TimeGenerated > ago(90d) \n| where SenderMailFromAddress in~ (SuspiciousSender)\n| summarize SenderFirstSeen=min(TimeGenerated), SenderLastSeen=max(TimeGenerated), EmailCount=dcount(NetworkMessageId), DistinctRecipients=dcount(RecipientEmailAddress) by SenderMailFromAddress\n| extend DaysSeen=datetime_diff('day',SenderLastSeen,SenderFirstSeen);\nSuspiciousEmails\n| lookup kind=leftouter (SenderIn90d) on SenderMailFromAddress\n| lookup (IdentityInfo | summarize arg_max(TimeGenerated,AccountUPN) by RecipientEmailAddress=MailAddress | project-away TimeGenerated) on RecipientEmailAddress\n",  
-                      "timerangetype": "3"  
-                    },  
-                    "path": "/queryDataV2",  
-                    "queries": {  
-                      "subscriptions": "[subscription().subscriptionId]",  
-                      "resourcegroups": "[resourceGroup().name]",  
-                      "resourcetype": "Log Analytics Workspace",  
-                      "resourcename": "[parameters('LogAnalyticsWorkspaceName')]"  
-                    }  
-                  }  
-                },  
-                "Get_UserId": {  
-                  "runAfter": {  
-                    "Run_query_to_get_Email_Details": [  
-                      "Succeeded"  
-                    ]  
-                  },  
-                  "type": "Http",  
-                  "inputs": {  
-                    "uri": "https://graph.microsoft.com/v1.0/users/@{body('Run_query_to_get_Email_Details')?['value'][0]?['RecipientEmailAddress']}",  
-                    "method": "GET",  
-                    "authentication": {  
-                      "type": "ManagedServiceIdentity",  
-                      "identity": "[variables('userAssignedIdentityId')]",  
-                      "audience": "https://graph.microsoft.com"  
-                    }  
-                  },  
-                  "runtimeConfiguration": {  
-                    "contentTransfer": {  
-                      "transferMode": "Chunked"  
-                    }  
-                  }  
-                },  
-                "Get_specific_Email_Id": {  
-                  "runAfter": {  
-                    "Get_UserId": [  
-                      "Succeeded"  
-                    ]  
-                  },  
-                  "type": "Http",  
-                  "inputs": {  
-                    "uri": "https://graph.microsoft.com/v1.0/users/@{body('Get_UserId')?['id']}/messages?$filter=subject%20eq%20'@{uriComponent(body('Run_query_to_get_Email_Details')?['value'][0]?['Subject'])}'%20and%20internetMessageId%20eq%20'@{uriComponent(body('Run_query_to_get_Email_Details')?['value'][0]?['InternetMessageId'])}'",  
-                    "method": "GET",  
-                    "authentication": {  
-                      "type": "ManagedServiceIdentity",  
-                      "identity": "[variables('userAssignedIdentityId')]",  
-                      "audience": "https://graph.microsoft.com"  
-                    }  
-                  },  
-                  "runtimeConfiguration": {  
-                    "contentTransfer": {  
-                      "transferMode": "Chunked"  
-                    }  
-                  }  
-                },  
-                "Junk_Email": {  
-                  "runAfter": {  
-                    "Get_specific_Email_Id": [  
-                      "Succeeded"  
-                    ]  
-                  },  
-                  "type": "Http",  
-                  "inputs": {  
-                    "uri": "https://graph.microsoft.com/v1.0/users/@{body('Get_UserId')?['id']}/messages/@{uriComponent(body('Get_specific_Email_Id')?['value'][0]?['id'])}/move",  
-                    "method": "POST",  
-                    "headers": {  
-                      "Content-Type": "application/json"  
-                    },  
-                    "body": {  
-                      "destinationId": "junkemail"  
-                    },  
-                    "authentication": {  
-                      "type": "ManagedServiceIdentity",  
-                      "identity": "[variables('userAssignedIdentityId')]",  
-                      "audience": "https://graph.microsoft.com"  
-                    }  
-                  },  
-                  "runtimeConfiguration": {  
-                    "contentTransfer": {  
-                      "transferMode": "Chunked"  
-                    }  
-                  }  
-                },  
-                "Check_Message": {  
-                  "runAfter": {  
-                    "Junk_Email": [  
-                      "Succeeded"  
-                    ]  
-                  },  
-                  "type": "Http",  
-                  "inputs": {  
-                    "uri": "https://graph.microsoft.com/v1.0/users/@{body('Get_UserId')?['id']}/messages/@{uriComponent(body('Get_specific_Email_Id')?['value'][0]?['id'])}?$select=parentFolderId",  
-                    "method": "GET",  
-                    "authentication": {  
-                      "type": "ManagedServiceIdentity",  
-                      "identity": "[variables('userAssignedIdentityId')]",  
-                      "audience": "https://graph.microsoft.com"  
-                    }  
-                  },  
-                  "runtimeConfiguration": {  
-                    "contentTransfer": {  
-                      "transferMode": "Chunked"  
-                    }  
-                  }  
-                },  
-                "get_Incident_ARMId": {  
-                  "runAfter": {  
-                    "Check_Message": [  
-                      "Failed"  
-                    ]  
-                  },  
-                  "type": "ApiConnection",  
-                  "inputs": {  
-                    "host": {  
-                      "connection": {  
-                        "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"  
-                      }  
-                    },  
-                    "method": "post",  
-                    "body": {  
-                      "query": "SecurityIncident\n| where TimeGenerated > ago(30d)\n| where AlertIds has '@{triggerBody()?['SystemAlertId']}'\n| extend ARM_Id = tostring(split(IncidentUrl, @\"/Microsoft_Azure_Security_Insights/Incident\")[1])\n| distinct ARM_Id, IncidentNumber",  
-                      "timerangetype": "3"  
-                    },  
-                    "path": "/queryDataV2",  
-                    "queries": {  
-                      "subscriptions": "[subscription().subscriptionId]",  
-                      "resourcegroups": "[resourceGroup().name]",  
-                      "resourcetype": "Log Analytics Workspace",  
-                      "resourcename": "[parameters('LogAnalyticsWorkspaceName')]"  
-                    }  
-                  }  
-                },  
-                "For_each_Incident": {  
-                  "foreach": "@body('get_Incident_ARMId')?['value']",  
-                  "actions": {  
-                    "Add_comment_to_incident_(V3)": {  
-                      "type": "ApiConnection",  
-                      "inputs": {  
-                        "host": {  
-                          "connection": {  
-                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
-                          }  
-                        },  
-                        "method": "post",  
-                        "body": {  
-                          "incidentArmId": "@items('For_each_Incident')?['ARM_Id']",  
-                          "message": "<p class=\"editor-paragraph\">[Analyst Action] The email from AlertId '@{triggerBody()?['SystemAlertId']}' was moved to junk folder on user's mailbox '@{body('Run_query_to_get_Email_Details')?['value'][0]?['RecipientEmailAddress']}' due to potential phishing incident with the following details:</p><br><p class=\"editor-paragraph\">Email Subject: @{body('Run_query_to_get_Email_Details')?['value'][0]?['Subject']}</p><p class=\"editor-paragraph\">Email Sender: @{body('Run_query_to_get_Email_Details')?['value'][0]?['SenderMailFromAddress']}</p><p class=\"editor-paragraph\">Sender First Seen in 90 days: @{body('Run_query_to_get_Email_Details')?['value'][0]?['SenderFirstSeen']}</p>"  
-                        },  
-                        "path": "/Incidents/Comment"  
-                      }  
-                    }  
-                  },  
-                  "runAfter": {  
-                    "get_Incident_ARMId": [  
-                      "Succeeded"  
-                    ]  
-                  },  
-                  "type": "Foreach"  
-                }  
-              },  
+            "Add_User_to_Group": {  
               "runAfter": {  
-                "Filter_MessageId": [  
+                "Initialize_ActionsTaken": [  
                   "Succeeded"  
                 ]  
               },  
-              "type": "Foreach"  
+              "type": "Http",  
+              "inputs": {  
+                "uri": "https://graph.microsoft.com/v1.0/groups/@{parameters('group-id')}/members/$ref",  
+                "method": "POST",  
+                "headers": {  
+                  "Content-type": "application/json"  
+                },  
+                "body": {  
+                  "@@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/@{triggerBody()?['Entity']?['properties']?['aadUserId']}"  
+                },  
+                "authentication": {  
+                  "type": "ManagedServiceIdentity",  
+                  "identity": "[variables('userAssignedIdentityId')]",  
+                  "audience": "https://graph.microsoft.com"  
+                }  
+              },  
+              "runtimeConfiguration": {  
+                "contentTransfer": {  
+                  "transferMode": "Chunked"  
+                }  
+              }  
+            },  
+            "Get_UPN": {  
+              "runAfter": {  
+                "Add_User_to_Group": [  
+                  "Succeeded",  
+                  "Failed",  
+                  "Skipped"  
+                ]  
+              },  
+              "type": "Compose",  
+              "inputs": "@coalesce(triggerBody()?['Entity']?['properties']?['additionalData']?['UpnName'],triggerBody()?['Entity']?['properties']?['additionalData']?['UserPrincipalName'])"  
+            },  
+            "Reset_a_password": {  
+              "runAfter": {  
+                "Get_UPN": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "Http",  
+              "inputs": {  
+                "uri": "https://graph.microsoft.com/v1.0/users/@{outputs('Get_UPN')}",  
+                "method": "PATCH",  
+                "body": {  
+                  "passwordProfile": {  
+                    "forceChangePasswordNextSignIn": true,  
+                    "forceChangePasswordNextSignInWithMfa": false,  
+                    "password": "@{substring(triggerBody()?['Entity']?['name'], 2, 10)}"  
+                  }  
+                },  
+                "authentication": {  
+                  "type": "ManagedServiceIdentity",  
+                  "identity": "[variables('userAssignedIdentityId')]",  
+                  "audience": "https://graph.microsoft.com"  
+                }  
+              },  
+              "runtimeConfiguration": {  
+                "contentTransfer": {  
+                  "transferMode": "Chunked"  
+                }  
+              }  
+            },  
+            "Append_to_ActionsTaken": {  
+              "runAfter": {  
+                "Reset_a_password": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "AppendToArrayVariable",  
+              "inputs": {  
+                "name": "ActionsTaken",  
+                "value": "User @{outputs('Get_UPN')} password has been successfully reset."  
+              }  
+            },  
+            "Revoke_sign-in_session": {  
+              "runAfter": {  
+                "Append_to_ActionsTaken": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "Http",  
+              "inputs": {  
+                "uri": "https://graph.microsoft.com/v1.0/users/@{outputs('Get_UPN')}/revokeSignInSessions",  
+                "method": "POST",  
+                "authentication": {  
+                  "type": "ManagedServiceIdentity",  
+                  "identity": "[variables('userAssignedIdentityId')]",  
+                  "audience": "https://graph.microsoft.com"  
+                }  
+              },  
+              "runtimeConfiguration": {  
+                "contentTransfer": {  
+                  "transferMode": "Chunked"  
+                }  
+              }  
+            },  
+            "Append_to_ActionsTaken2": {  
+              "runAfter": {  
+                "Revoke_sign-in_session": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "AppendToArrayVariable",  
+              "inputs": {  
+                "name": "ActionsTaken",  
+                "value": "User @{outputs('Get_UPN')} active sign-in sessions have been revoked"  
+              }  
+            },  
+            "Send_an_email_(V2)": {  
+              "runAfter": {  
+                "Append_to_ActionsTaken2": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "type": "ApiConnection",  
+              "inputs": {  
+                "host": {  
+                  "connection": {  
+                    "name": "@parameters('$connections')['office365']['connectionId']"  
+                  }  
+                },  
+                "method": "post",  
+                "body": {  
+                  "To": "@parameters('NotificationRecipients')",  
+                  "Subject": "Password Reset and Session Revocation for user @{outputs('Get_UPN')}",  
+                  "Body": "<style>\n    body {\n      font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;\n      background-color: #ffffff;\n      color: #333;\n    }\n    .container {\n      padding: 20px;\n      border: 1px solid #ddd;\n      border-radius: 6px;\n    }\n    .header {\n      font-size: 18px;\n      font-weight: bold;\n      color: #2e6c80;\n      margin-bottom: 10px;\n    }\n    .section-title {\n      font-weight: bold;\n      margin-top: 20px;\n      margin-bottom: 10px;\n    }\n    .actions {\n      background-color: #f4f4f4;\n      padding: 15px;\n      border-radius: 5px;\n    }\n    .action-item {\n      margin-bottom: 10px;\n    }\n  </style>\n<div class=\"container\">\n  <div class=\"header\">Security Response Notification</div>\n  <p>The following actions have been successfully executed using the Sentinel Playbook <strong>ResetPasswordSessionRevoke</strong> for the account:</p>\n  <p><strong>@{outputs('Get_UPN')}</strong></p>\n  <div class=\"section-title\">Actions Performed:</div>\n  <div class=\"actions\">\n    <div class=\"action-item\">\n      @{if(contains(join(variables('ActionsTaken'), ' '), 'password has been successfully reset'), concat('✅ The password for user ', outputs('Get_UPN'), ' has been successfully reset. The user will be prompted to set a new password upon next sign-in.'), '')}\n    </div>\n    <div class=\"action-item\">\n      @{if(contains(join(variables('ActionsTaken'), ' '), 'active sign-in sessions have been revoked'), '🔒 All active sign-in sessions for this user have been revoked. The user must reauthenticate in all applications to regain access.', '')}\n    </div>\n  </div>\n  <p>If you have any questions or require further assistance, please contact the security operations team.</p>\n</div>",  
+                  "Importance": "Normal"  
+                },  
+                "path": "/v2/Mail"  
+              }  
+            },  
+            "IsSentinel_Incident": {  
+              "actions": {  
+                "Compose_Comments": {  
+                  "type": "Compose",  
+                  "inputs": "[Analyst Action]\n\n@{join(variables('ActionsTaken'), '\n- ')}"  
+                },  
+                "Add_comment_to_incident": {  
+                  "runAfter": {  
+                    "Compose_Comments": [  
+                      "Succeeded"  
+                    ]  
+                  },  
+                  "type": "ApiConnection",  
+                  "inputs": {  
+                    "host": {  
+                      "connection": {  
+                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
+                      }  
+                    },  
+                    "method": "post",  
+                    "body": {  
+                      "incidentArmId": "@triggerBody()?['IncidentArmID']",  
+                      "message": "<p class=\"editor-paragraph\">@{outputs('Compose_Comments')}</p>"  
+                    },  
+                    "path": "/Incidents/Comment"  
+                  }  
+                }  
+              },  
+              "runAfter": {  
+                "Send_an_email_(V2)": [  
+                  "Succeeded"  
+                ]  
+              },  
+              "else": {  
+                "actions": {}  
+              },  
+              "expression": {  
+                "and": [  
+                  {  
+                    "not": {  
+                      "equals": [  
+                        "@triggerBody()?['IncidentArmID']",  
+                        "@null"  
+                      ]  
+                    }  
+                  }  
+                ]  
+              },  
+              "type": "If"  
             }  
           },  
           "outputs": {}  
@@ -298,15 +332,34 @@
                     "type": "ManagedServiceIdentity"  
                   }  
                 }  
+              },  
+              "office365": {  
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]",  
+                "connectionId": "[variables('connections_office365_externalid')]",  
+                "connectionName": "office365"  
               }  
             }  
           }  
         }  
       }  
+    },  
+    {  
+      "type": "Microsoft.Web/connections",  
+      "apiVersion": "2016-06-01",  
+      "name": "office365",  
+      "location": "[variables('resourceGroupLocation')]",  
+      "kind": "V1",  
+      "properties": {  
+        "displayName": "office365",  
+        "customParameterValues": {},  
+        "api": {  
+          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]"  
+        }  
+      }  
     }  
   ],  
   "metadata": {  
-    "description": "Deploys a Logic App that, in response to Sentinel alerts containing suspicious email messages, queries details from Log Analytics, takes Graph actions to move email to Junk, and posts the analyst action to incident comments. Requires user-assigned identity with Microsoft Graph and Log Analytics access."  
+    "description": "Deploys a Logic App that resets user password, revokes sessions, adds user to group, and posts notification and comments for Sentinel playbooks. Parameters allow group and notification customization for security identity response automation."  
   },  
   "outputs": {  
     "logicAppResourceId": {  
