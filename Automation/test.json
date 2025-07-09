@@ -20,7 +20,8 @@
       "127.0.0.2,TRUE",
       "192.168.0.5,TRUE"
     ],
-    "rawContent": "[concat(join(variables('rawCsvLines'), '\r\n'), '\r\n')]"
+    "rawContent": "[concat(join(variables('rawCsvLines'), '\r\n'), '\r\n')]",
+    "watchlistName": "MSSE_Trusted_IPs",
   },
   "resources": [
     {
@@ -29,7 +30,7 @@
       "name": "[concat(parameters('workspace'), '/Microsoft.SecurityInsights/', variables('watchlistName'))]",
       "location": "[resourceGroup().location]",
       "tags": {
-        "lastDeployed": "[utcNow()]"
+        "lastDeployed": "[variables('deploymentTimestamp')]"
       },
       "properties": {
         "displayName": "[variables('watchlistName')]",
