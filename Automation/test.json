@@ -22,7 +22,7 @@
       "10.0.0.2,FALSE",
       "192.168.0.1,TRUE"
     ],
-    "rawContent": "[concat(join(variables('rawCsvLines'), '\n'), '\n')]"
+    "rawContent": "[concat(join(variables('rawCsvLines'), '\r\n'), '\r\n')]"
   },
   "resources": [
     {
@@ -40,7 +40,7 @@
         "contentType": "Text/Csv",
         "numberOfLinesToSkip": 0,
         "itemsSearchKey": "[variables('itemsSearchKey')]",
-        "rawContent": "IP_Address,Subnet\r\n127.0.0.1,FALSE\r\n"
+        "rawContent": "[variables('rawContent')]"
       },
       "dependsOn": []
     }
