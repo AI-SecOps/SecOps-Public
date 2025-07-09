@@ -18,6 +18,13 @@
         "description": "Name (also used as alias/displayName) of the watchlist."
       }
     },
+    "itemsSearchKey": {
+      "type": "string",
+      "defaultValue": "Col1",
+      "metadata": {
+        "description": "Key to search for items in the watchlist. This should match one of the columns in the CSV."
+      }
+    },
     "rawCsvLines": {
       "type": "array",
       "defaultValue": [
@@ -43,8 +50,9 @@
   },
   "resources": [
     {
-      "type": "Microsoft.OperationalInsights/workspaces/providers/Microsoft.SecurityInsights/watchlists",
-      "apiVersion": "2021-10-01-preview",
+      "type": "Microsoft.OperationalInsights/workspaces/providers/watchlists",
+      "apiVersion": "2022-08-01",
+      "kind": "",
       "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', parameters('watchlistName'))]",
       "location": "[variables('location')]",
       "dependsOn": [
@@ -52,25 +60,18 @@
       ],
       "properties": {
         "displayName": "[variables('displayName')]",
+        "source": "[concat(variables('watchlistAlias'), '.csv')]",
         "description": "[variables('description')]",
-        "provider": "Azure Sentinel",
+        "provider": "Custom",
         "watchlistAlias": "[variables('watchlistAlias')]",
         "contentType": "text/csv",
         "rawContent": "[variables('watchlistContent')]",
+        "defaultDuration": "P1000Y",
         "infoUri": "",
-        "publish": false,
+        "numberOfLinesToSkip": 0,
+        "itemsSearchKey": "[parameters('itemsSearchKey')]",
         "labels": []
       }
     }
-  ],
-  "outputs": {
-    "watchlistResourceId": {
-      "type": "string",
-      "value": "[concat(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')),'/providers/Microsoft.SecurityInsights/watchlists/',parameters('watchlistName'))]"
-    },
-    "watchlistAlias": {
-      "type": "string",
-      "value": "[variables('watchlistAlias')]"
-    }
-  }
+  ]
 }
