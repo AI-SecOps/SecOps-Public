@@ -1,77 +1,34 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "metadata": {
-    "description": "Deploys an Azure Sentinel watchlist with dummy CSV values (5×5) using minimal parameters."
-  },
-  "parameters": {
-    "workspaceName": {
-      "type": "string",
-      "metadata": {
-        "description": "Name of the Log Analytics workspace."
-      }
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0",
+    "parameters": {
+        "workspace": {
+            "type": "string",
+            "metadata": {
+                "description": "Workspace name for Log Analytics where Sentinel is setup"
+            }
+        }
     },
-    "watchlistName": {
-      "type": "string",
-      "defaultValue": "dummyWatchlist",
-      "metadata": {
-        "description": "Name (also used as alias/displayName) of the watchlist."
-      }
-    },
-    "itemsSearchKey": {
-      "type": "string",
-      "defaultValue": "Col1",
-      "metadata": {
-        "description": "Key to search for items in the watchlist. This should match one of the columns in the CSV."
-      }
-    },
-    "rawCsvLines": {
-      "type": "array",
-      "defaultValue": [
-        "Col1,Col2,Col3,Col4,Col5",
-        "row1c1,row1c2,row1c3,row1c4,row1c5",
-        "row2c1,row2c2,row2c3,row2c4,row2c5",
-        "row3c1,row3c2,row3c3,row3c4,row3c5",
-        "row4c1,row4c2,row4c3,row4c4,row4c5",
-        "row5c1,row5c2,row5c3,row5c4,row5c5"
-      ],
-      "metadata": {
-        "description": "Array of CSV lines for the watchlist (first element is header)."
-      }
-    }
-  },
-  "variables": {
-    "location": "[resourceGroup().location]",
-    "displayName": "[parameters('watchlistName')]",
-    "watchlistAlias": "[parameters('watchlistName')]",
-    "description": "[concat('Watchlist ', parameters('watchlistName'), ' created via ARM template.')]",
-    "rawCsv": "[join(parameters('rawCsvLines'), '\n')]",
-    "watchlistContent": "[base64(variables('rawCsv'))]"
-  },
-  "resources": [
-    {
-      "type": "Microsoft.OperationalInsights/workspaces/providers/watchlists",
-      "apiVersion": "2022-08-01",
-      "kind": "",
-      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', parameters('watchlistName'))]",
-      "location": "[variables('location')]",
-      "dependsOn": [
-        "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
-      ],
-      "properties": {
-        "displayName": "[variables('displayName')]",
-        "source": "[concat(variables('watchlistAlias'), '.csv')]",
-        "description": "[variables('description')]",
-        "provider": "Custom",
-        "watchlistAlias": "[variables('watchlistAlias')]",
-        "contentType": "text/csv",
-        "rawContent": "[variables('watchlistContent')]",
-        "defaultDuration": "P1000Y",
-        "infoUri": "",
-        "numberOfLinesToSkip": 0,
-        "itemsSearchKey": "[parameters('itemsSearchKey')]",
-        "labels": []
-      }
-    }
-  ]
+    "resources": [
+        {
+            "name": "[concat(parameters('workspace'), '/Microsoft.SecurityInsights/MSSE_Trusted_IPs')]",
+            "type": "Microsoft.OperationalInsights/workspaces/providers/Watchlists",
+            "kind": "",
+            "properties": {
+                "displayName": "MSSE_Trusted_IPs",
+                "source": "trusted_ips.csv",
+                "description": "List of trusted IPs for the organization",
+                "provider": "Custom",
+                "isDeleted": false,
+                "labels": [
+                ],
+                "defaultDuration": "P1000Y",
+                "contentType": "Text/Csv",
+                "numberOfLinesToSkip": 0,
+                "itemsSearchKey": "IP_Address",
+                "rawContent": "IP_Address,Subnet\r\n127.0.0.1,FALSE\r\n"
+            },
+            "apiVersion": "2022-08-01"
+        }
+    ]
 }
