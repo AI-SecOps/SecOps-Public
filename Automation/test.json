@@ -10,7 +10,7 @@
     }
   },
   "variables": {
-    "watchlistName": "Trusted_IPs",
+    "watchlistName": "MSSE_Trusted_IPs",
     "sourceFile": "trusted_ips.csv",
     "description": "List of trusted IPs for the organization",
     "itemsSearchKey": "IP_Address",
