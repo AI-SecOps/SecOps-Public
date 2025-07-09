@@ -1,432 +1,76 @@
-{  
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",  
-  "contentVersion": "1.0.0.0",  
-  "parameters": {  
-    "LogicAppName": {  
-      "defaultValue": "ResetPasswordSessionRevoke-Incident",  
-      "type": "String"  
-    },  
-    "userAssignedIdentityName": {  
-      "defaultValue": "POCs_MI",  
-      "type": "String",  
-      "metadata": {  
-        "description": "User Assigned Managed Identity for Security Identity Responder"  
-      }  
-    },  
-    "AzureSentinelAPI": {  
-      "defaultValue": "azuresentinel-3",  
-      "type": "String",  
-      "metadata": {  
-        "description": "Azure Sentinel API connection name."  
-      }  
-    },  
-    "LogAnalyticsAPI": {  
-      "defaultValue": "azuremonitorlogs",  
-      "type": "String",  
-      "metadata": {  
-        "description": "Azure Monitor Logs API connection name."  
-      }  
-    },  
-    "LogAnalyticsWorkspaceName": {  
-      "defaultValue": "GoogleLab-Workspace",  
-      "type": "String",  
-      "metadata": {  
-        "description": "Log Analytics workspace name."  
-      }  
-    },  
-    "notificationEmailRecipients": {  
-      "defaultValue": "test@example.com",  
-      "type": "String",  
-      "metadata": {  
-        "description": "Recipients for notifications."  
-      }  
-    },  
-    "GroupID": {  
-      "type": "String",  
-      "defaultValue": "",  
-      "metadata": {  
-        "description": "Azure AD Group ID for containment, if account should be added to a group."  
-      }  
-    }  
-  },  
-  "variables": {  
-    "resourceGroupLocation": "[resourceGroup().location]",  
-    "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",  
-    "logAnalyticsID": "[concat('/subscriptions/', subscription().subscriptionId, '/resourcegroups/', resourceGroup().name, '/providers/microsoft.operationalinsights/workspaces/', parameters('LogAnalyticsWorkspaceName'))]",  
-    "connections_azuresentinel_externalid": "[resourceId('Microsoft.Web/connections/', parameters('AzureSentinelAPI'))]",  
-    "connections_azuremonitorlogs_externalid": "[resourceId('Microsoft.Web/connections/', parameters('LogAnalyticsAPI'))]",  
-    "connections_office365_externalid": "[resourceId('Microsoft.Web/connections/', 'office365')]"  
-  },  
-  "resources": [  
-    {  
-      "type": "Microsoft.Logic/workflows",  
-      "apiVersion": "2017-07-01",  
-      "name": "[parameters('LogicAppName')]",  
-      "location": "[variables('resourceGroupLocation')]",  
-      "identity": {  
-        "type": "UserAssigned",  
-        "userAssignedIdentities": {  
-          "[variables('userAssignedIdentityId')]": {}  
-        }  
-      },  
-      "properties": {  
-        "state": "Enabled",  
-        "definition": {  
-          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",  
-          "contentVersion": "1.0.0.0",  
-          "parameters": {  
-            "group-id": {  
-              "defaultValue": "[parameters('GroupID')]",  
-              "type": "String"  
-            },  
-            "NotificationRecipients": {  
-              "defaultValue": "[parameters('notificationEmailRecipients')]",  
-              "type": "String"  
-            },  
-            "$connections": {  
-              "defaultValue": {},  
-              "type": "Object"  
-            }  
-          },  
-          "triggers": {  
-            "Microsoft_Sentinel_incident": {  
-              "type": "ApiConnectionWebhook",  
-              "inputs": {  
-                "host": {  
-                  "connection": {  
-                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
-                  }  
-                },  
-                "body": {  
-                  "callback_url": "@{listCallbackUrl('Microsoft.Logic/workflows/triggers', parameters('LogicAppName'), 'Microsoft.Logic', '2016-06-01')}"  
-                },  
-                "path": "/incident-creation"  
-              }  
-            }  
-          },  
-          "actions": {  
-            "Entities_-_Get_Accounts": {  
-              "runAfter": {},  
-              "type": "ApiConnection",  
-              "inputs": {  
-                "host": {  
-                  "connection": {  
-                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
-                  }  
-                },  
-                "method": "post",  
-                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",  
-                "path": "/entities/account"  
-              }  
-            },  
-            "Threshold": {  
-              "runAfter": {  
-                "Entities_-_Get_Accounts": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "InitializeVariable",  
-              "inputs": {  
-                "variables": [  
-                  {  
-                    "name": "Threshold",  
-                    "type": "integer",  
-                    "value": 10  
-                  }  
-                ]  
-              }  
-            },  
-            "Initialize_ActionsTaken": {  
-              "runAfter": {  
-                "Threshold": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "InitializeVariable",  
-              "inputs": {  
-                "variables": [  
-                  {  
-                    "name": "ActionsTaken",  
-                    "type": "array",  
-                    "value": []  
-                  }  
-                ]  
-              }  
-            },  
-            "Entity_Count": {  
-              "runAfter": {  
-                "Initialize_ActionsTaken": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "type": "Compose",  
-              "inputs": "@length(body('Entities_-_Get_Accounts')?['Accounts'])"  
-            },  
-            "Within_Threshold": {  
-              "actions": {  
-                "For_each": {  
-                  "foreach": "@body('Entities_-_Get_Accounts')?['Accounts']",  
-                  "actions": {  
-                    "Get_UPN": {  
-                      "type": "Compose",  
-                      "inputs": "@coalesce(items('For_each')?['additionalData']?['UserPrincipalName'],items('For_each')?['additionalData']?['UpnName'])"  
-                    },  
-                    "Add_User_to_Group": {  
-                      "runAfter": {  
-                        "Get_UPN": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "type": "Http",  
-                      "inputs": {  
-                        "uri": "https://graph.microsoft.com/v1.0/groups/@{parameters('group-id')}/members/$ref",  
-                        "method": "POST",  
-                        "headers": {  
-                          "Content-type": "application/json"  
-                        },  
-                        "body": {  
-                          "@@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/@{items('For_each')?['aadUserId']}"  
-                        },  
-                        "authentication": {  
-                          "type": "ManagedServiceIdentity",  
-                          "identity": "[variables('userAssignedIdentityId')]",  
-                          "audience": "https://graph.microsoft.com"  
-                        }  
-                      },  
-                      "runtimeConfiguration": {  
-                        "contentTransfer": {  
-                          "transferMode": "Chunked"  
-                        }  
-                      }  
-                    },  
-                    "Reset_a_password": {  
-                      "runAfter": {  
-                        "Add_User_to_Group": [  
-                          "Succeeded",  
-                          "Failed",  
-                          "Skipped"  
-                        ]  
-                      },  
-                      "type": "Http",  
-                      "inputs": {  
-                        "uri": "https://graph.microsoft.com/v1.0/users/@{outputs('Get_UPN')}",  
-                        "method": "PATCH",  
-                        "body": {  
-                          "passwordProfile": {  
-                            "forceChangePasswordNextSignIn": true,  
-                            "forceChangePasswordNextSignInWithMfa": false,  
-                            "password": "@{substring(outputs('Add_User_to_Group')?['headers']['request-id'], 2, 10)}"  
-                          }  
-                        },  
-                        "authentication": {  
-                          "type": "ManagedServiceIdentity",  
-                          "identity": "[variables('userAssignedIdentityId')]",  
-                          "audience": "https://graph.microsoft.com"  
-                        }  
-                      },  
-                      "runtimeConfiguration": {  
-                        "contentTransfer": {  
-                          "transferMode": "Chunked"  
-                        }  
-                      }  
-                    },  
-                    "Append_to_ActionsTaken": {  
-                      "runAfter": {  
-                        "Reset_a_password": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "type": "AppendToArrayVariable",  
-                      "inputs": {  
-                        "name": "ActionsTaken",  
-                        "value": "User @{outputs('Get_UPN')} password has been successfully reset."  
-                      }  
-                    },  
-                    "Revoke_sign-in_session": {  
-                      "runAfter": {  
-                        "Append_to_ActionsTaken": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "type": "Http",  
-                      "inputs": {  
-                        "uri": "https://graph.microsoft.com/v1.0/users/@{outputs('Get_UPN')}/revokeSignInSessions",  
-                        "method": "POST",  
-                        "authentication": {  
-                          "type": "ManagedServiceIdentity",  
-                          "identity": "[variables('userAssignedIdentityId')]",  
-                          "audience": "https://graph.microsoft.com"  
-                        }  
-                      },  
-                      "runtimeConfiguration": {  
-                        "contentTransfer": {  
-                          "transferMode": "Chunked"
-                        }  
-                      }  
-                    },  
-                    "Append_to_ActionsTaken2": {  
-                      "runAfter": {  
-                        "Revoke_sign-in_session": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "type": "AppendToArrayVariable",  
-                      "inputs": {  
-                        "name": "ActionsTaken",  
-                        "value": "User @{outputs('Get_UPN')} active sign-in sessions have been revoked"  
-                      }  
-                    },  
-                    "Send_an_email_(V2)": {  
-                      "runAfter": {  
-                        "Append_to_ActionsTaken2": [  
-                          "Succeeded"  
-                        ]  
-                      },  
-                      "type": "ApiConnection",  
-                      "inputs": {  
-                        "host": {  
-                          "connection": {  
-                            "name": "@parameters('$connections')['office365']['connectionId']"  
-                          }  
-                        },  
-                        "method": "post",  
-                        "body": {  
-                          "To": "@parameters('NotificationRecipients')",  
-                          "Subject": "Security Incident Response: Password Reset and Session Revocation for user @{outputs('Get_UPN')}",  
-                          "Body": "<style>body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#fff;color:#333;}.container{padding:20px;border:1px solid #ddd;border-radius:6px;}.header{font-size:18px;font-weight:bold;color:#2e6c80;margin-bottom:10px;}.section-title{font-weight:bold;margin-top:20px;margin-bottom:10px;}.actions{background-color:#f4f4f4;padding:15px;border-radius:5px;}.action-item{margin-bottom:10px;}</style><div class=\"container\"><div class=\"header\">Incident Action Summary</div><p>The following actions have been successfully executed for the incident titled:</p><p><strong>@{triggerBody()?['object']?['properties']?['title']}</strong></p><p>using the Sentinel Playbook <strong>ResetPasswordSessionRevoke</strong> for the account:</p><p><strong>@{outputs('Get_UPN')}</strong></p><div class=\"section-title\">Actions Taken:</div><div class=\"actions\"><div class=\"action-item\">@{if(contains(join(variables('ActionsTaken'), ' '), 'password has been successfully reset'), concat('✅ The password for user ', outputs('Get_UPN'), ' has been successfully reset.'), '')}</div><div class=\"action-item\">@{if(contains(join(variables('ActionsTaken'), ' '), 'active sign-in sessions have been revoked'), '🔒 All active sign-in sessions for this user have been revoked.', '')}</div></div><p>If you have any questions or need further assistance, please contact the security operations team.</p></div>",  
-                          "Importance": "Normal"  
-                        },  
-                        "path": "/v2/Mail"  
-                      }  
-                    }  
-                  },  
-                  "type": "Foreach"  
-                },  
-                "Add_comment_to_incident_(V3)": {  
-                  "runAfter": {  
-                    "For_each": [  
-                      "Succeeded"  
-                    ]  
-                  },  
-                  "type": "ApiConnection",  
-                  "inputs": {  
-                    "host": {  
-                      "connection": {  
-                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"  
-                      }  
-                    },  
-                    "method": "post",  
-                    "body": {  
-                      "incidentArmId": "@triggerBody()?['object']?['id']",  
-                      "message": "<p class=\"editor-paragraph\"><b><strong class=\"editor-text-bold\" style=\"font-size: 12px;\">Actions Taken:</strong></b></p><br><p class=\"editor-paragraph\">@{join(variables('ActionsTaken'), '\n- ')}</p>"  
-                    },  
-                    "path": "/Incidents/Comment"  
-                  }  
-                }  
-              },  
-              "runAfter": {  
-                "Entity_Count": [  
-                  "Succeeded"  
-                ]  
-              },  
-              "else": {  
-                "actions": {  
-                  "Send_an_email_-_Threshold_Exceeded": {  
-                    "type": "ApiConnection",  
-                    "inputs": {  
-                      "host": {  
-                        "connection": {  
-                          "name": "@parameters('$connections')['office365']['connectionId']"  
-                        }  
-                      },  
-                      "method": "post",  
-                      "body": {  
-                            "To": "@parameters('NotificationRecipients')",
-                            "Subject": "[concat('Automation Skipped: Account Threshold Exceeded for ', parameters('LogicAppName'))]",
-                            "Body": "[concat('\n\n\n  \n  <style>\n    body {\n      font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;\n      background-color: #ffffff;\n      color: #333;\n    }\n    .container {\n      padding: 20px;\n      border: 1px solid #ddd;\n      border-radius: 6px;\n    }\n    .header {\n      font-size: 18px;\n      font-weight: bold;\n      color: #b00020;\n      margin-bottom: 10px;\n    }\n    .section-title {\n      font-weight: bold;\n      margin-top: 20px;\n      margin-bottom: 10px;\n    }\n    .note {\n      background-color: #fff3cd;\n      border: 1px solid #ffeeba;\n      padding: 15px;\n      border-radius: 5px;\n      color: #856404;\n    }\n  </style>\n\n\n  <div class=\"container\">\n    <div class=\"header\">Playbook Execution Skipped</div>\n\n    <p>The Sentinel Playbook <strong>', parameters('LogicAppName'), '</strong> was not executed for the following incident:</p>\n    <p><strong>@{triggerBody()?[''object'']?[''properties'']?[''title'']}</strong></p>\n\n    <div class=\"section-title\">Reason:</div>\n    <div class=\"note\">\n      The incident contains more than <strong>@{variables(''Threshold'')}</strong> linked accounts, which exceeds the configured execution threshold.\n    </div>\n\n    <div class=\"section-title\">Recommended Actions:</div>\n    <ul>\n      <li>🔄 Review the incident details in Microsoft Sentinel.</li>\n      <li>🛠️ Execute the <strong>ResetPasswordSessionRevoke-Account</strong> playbook manually for each affected account.</li>\n      <li>⚙️ If appropriate, consider increasing the threshold limit to allow automatic execution for incidents with more linked accounts.</li>\n    </ul>\n\n    <p>If you have any questions or require assistance, please contact the security operations team.</p>\n  </div>\n\n\n')]",
-                            "Importance": "Normal"
-                      },  
-                      "path": "/v2/Mail"  
-                    }  
-                  }  
-                }  
-              },  
-              "expression": {  
-                "and": [  
-                  {  
-                    "lessOrEquals": [  
-                      "@outputs('Entity_Count')",  
-                      "@variables('Threshold')"  
-                    ]  
-                  }  
-                ]  
-              },  
-              "type": "If"  
-            }  
-          },  
-          "outputs": {}  
-        },  
-        "parameters": {  
-          "$connections": {  
-            "value": {  
-              "azuresentinel": {  
-                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), parameters('AzureSentinelAPI'))]",  
-                "connectionId": "[variables('connections_azuresentinel_externalid')]",  
-                "connectionName": "azuresentinel",  
-                "connectionProperties": {  
-                  "authentication": {  
-                    "identity": "[variables('userAssignedIdentityId')]",  
-                    "type": "ManagedServiceIdentity"  
-                  }  
-                }  
-              },  
-              "azuremonitorlogs": {  
-                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'azuremonitorlogs')]",  
-                "connectionId": "[variables('connections_azuremonitorlogs_externalid')]",  
-                "connectionName": "azuremonitorlogs",  
-                "connectionProperties": {  
-                  "authentication": {  
-                    "identity": "[variables('userAssignedIdentityId')]",  
-                    "type": "ManagedServiceIdentity"  
-                  }  
-                }  
-              },  
-              "office365": {  
-                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]",  
-                "connectionId": "[variables('connections_office365_externalid')]",  
-                "connectionName": "office365"  
-              }  
-            }  
-          }  
-        }  
-      }  
-    },  
-    {  
-      "type": "Microsoft.Web/connections",  
-      "apiVersion": "2016-06-01",  
-      "name": "office365",  
-      "location": "[variables('resourceGroupLocation')]",  
-      "kind": "V1",  
-      "properties": {  
-        "displayName": "office365",  
-        "customParameterValues": {},  
-        "api": {  
-          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'office365')]"  
-        }  
-      }  
-    }  
-  ],  
-  "metadata": {  
-    "description": "Deploys a Logic App that performs account containment, password resets, and session revocation for all linked accounts in a Sentinel incident, notifies by email, and adds incident comments. Threshold can prevent bulk execution for large incidents. Uses a single Sentinel API connection for all actions."  
-  },  
-  "outputs": {  
-    "logicAppResourceId": {  
-      "type": "string",  
-      "value": "[resourceId('Microsoft.Logic/workflows', parameters('LogicAppName'))]"  
-    },  
-    "logicAppRunUrl": {  
-      "type": "string",  
-      "value": "[concat('https://portal.azure.com/#@', tenant().tenantId, '/resource', resourceId('Microsoft.Logic/workflows', parameters('LogicAppName')), '/overview')]"  
-    }  
-  }  
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Deploys an Azure Sentinel watchlist with dummy CSV values (5×5) using minimal parameters."
+  },
+  "parameters": {
+    "workspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Log Analytics workspace."
+      }
+    },
+    "watchlistName": {
+      "type": "string",
+      "defaultValue": "dummyWatchlist",
+      "metadata": {
+        "description": "Name (also alias/displayName) of the watchlist."
+      }
+    },
+    "rawCsvLines": {
+      "type": "array",
+      "defaultValue": [
+        "Col1,Col2,Col3,Col4,Col5",
+        "row1c1,row1c2,row1c3,row1c4,row1c5",
+        "row2c1,row2c2,row2c3,row2c4,row2c5",
+        "row3c1,row3c2,row3c3,row3c4,row3c5",
+        "row4c1,row4c2,row4c3,row4c4,row4c5",
+        "row5c1,row5c2,row5c3,row5c4,row5c5"
+      ],
+      "metadata": {
+        "description": "Array of CSV lines for the watchlist (first element is header)."
+      }
+    }
+  },
+  "variables": {
+    "location": "[resourceGroup().location]",
+    "displayName": "[parameters('watchlistName')]",
+    "watchlistAlias": "[parameters('watchlistName')]",
+    "description": "[concat('Watchlist ', parameters('watchlistName'), ' created via ARM template.')]",
+    "rawCsv": "[join(parameters('rawCsvLines'), '\n')]",
+    "watchlistContent": "[base64(variables('rawCsv'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/Microsoft.SecurityInsights/watchlists",
+      "apiVersion": "2021-10-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', parameters('watchlistName'))]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+      ],
+      "properties": {
+        "displayName": "[variables('displayName')]",
+        "description": "[variables('description')]",
+        "provider": "Azure Sentinel",
+        "watchlistAlias": "[variables('watchlistAlias')]",
+        "contentType": "text/csv",
+        "rawContent": "[variables('watchlistContent')]",
+        "infoUri": "",
+        "publish": false,
+        "labels": []
+      }
+    }
+  ],
+  "outputs": {
+    "watchlistResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces/providers/Microsoft.SecurityInsights/watchlists', parameters('workspaceName'), parameters('watchlistName'))]"
+    },
+    "watchlistAlias": {
+      "type": "string",
+      "value": "[variables('watchlistAlias')]"
+    }
+  }
 }
