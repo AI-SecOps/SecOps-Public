@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0",
+  "contentVersion": "1.0.0.0",
   "parameters": {
     "workspace": {
       "type": "string",
       "metadata": {
-        "description": "Workspace name for Log Analytics where Sentinel is setup"
+        "description": "Log Analytics workspace name where Sentinel is enabled."
       }
     }
   },
@@ -18,16 +18,17 @@
       "IP_Address,Subnet",
       "127.0.0.1,FALSE",
       "127.0.0.2,TRUE",
-      "10.0.0.1,TRUE"
+      "10.0.0.1,TRUE",
+      "10.0.0.2,FALSE",
+      "192.168.0.1,TRUE"
     ],
-    "rawContent": "[concat(join(variables('rawCsvLines'), '\\r\\n'), '\\r\\n')]"
+    "rawContent": "[concat(join(variables('rawCsvLines'), '\n'), '\n')]"
   },
   "resources": [
     {
-      "name": "[concat(parameters('workspace'), '/Microsoft.SecurityInsights/', variables('watchlistName'))]",
-      "type": "Microsoft.OperationalInsights/workspaces/providers/Watchlists",
+      "type": "Microsoft.OperationalInsights/workspaces/providers/Microsoft.SecurityInsights/watchlists",
       "apiVersion": "2022-08-01",
-      "kind": "",
+      "name": "[concat(parameters('workspace'), '/Microsoft.SecurityInsights/', variables('watchlistName'))]",
       "properties": {
         "displayName": "[variables('watchlistName')]",
         "source": "[variables('sourceFile')]",
@@ -40,7 +41,8 @@
         "numberOfLinesToSkip": 0,
         "itemsSearchKey": "[variables('itemsSearchKey')]",
         "rawContent": "[variables('rawContent')]"
-      }
+      },
+      "dependsOn": []
     }
   ]
 }
