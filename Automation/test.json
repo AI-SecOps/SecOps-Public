@@ -1,34 +1,46 @@
 {
-    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-    "contentVersion": "1.0",
-    "parameters": {
-        "workspace": {
-            "type": "string",
-            "metadata": {
-                "description": "Workspace name for Log Analytics where Sentinel is setup"
-            }
-        }
-    },
-    "resources": [
-        {
-            "name": "[concat(parameters('workspace'), '/Microsoft.SecurityInsights/MSSE_Trusted_IPs')]",
-            "type": "Microsoft.OperationalInsights/workspaces/providers/Watchlists",
-            "kind": "",
-            "properties": {
-                "displayName": "MSSE_Trusted_IPs",
-                "source": "trusted_ips.csv",
-                "description": "List of trusted IPs for the organization",
-                "provider": "Custom",
-                "isDeleted": false,
-                "labels": [
-                ],
-                "defaultDuration": "P1000Y",
-                "contentType": "Text/Csv",
-                "numberOfLinesToSkip": 0,
-                "itemsSearchKey": "IP_Address",
-                "rawContent": "IP_Address,Subnet\r\n127.0.0.1,FALSE\r\n"
-            },
-            "apiVersion": "2022-08-01"
-        }
-    ]
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0",
+  "parameters": {
+    "workspace": {
+      "type": "string",
+      "metadata": {
+        "description": "Workspace name for Log Analytics where Sentinel is setup"
+      }
+    }
+  },
+  "variables": {
+    "watchlistName": "Trusted_IPs",
+    "sourceFile": "trusted_ips.csv",
+    "description": "List of trusted IPs for the organization",
+    "itemsSearchKey": "IP_Address",
+    "rawCsvLines": [
+      "IP_Address,Subnet",
+      "127.0.0.1,FALSE",
+      "127.0.0.2,TRUE",
+      "10.0.0.1,TRUE"
+    ],
+    "rawContent": "[concat(join(variables('rawCsvLines'), '\\r\\n'), '\\r\\n')]"
+  },
+  "resources": [
+    {
+      "name": "[concat(parameters('workspace'), '/Microsoft.SecurityInsights/', variables('watchlistName'))]",
+      "type": "Microsoft.OperationalInsights/workspaces/providers/Watchlists",
+      "apiVersion": "2022-08-01",
+      "kind": "",
+      "properties": {
+        "displayName": "[variables('watchlistName')]",
+        "source": "[variables('sourceFile')]",
+        "description": "[variables('description')]",
+        "provider": "Custom",
+        "isDeleted": false,
+        "labels": [],
+        "defaultDuration": "P1000Y",
+        "contentType": "Text/Csv",
+        "numberOfLinesToSkip": 0,
+        "itemsSearchKey": "[variables('itemsSearchKey')]",
+        "rawContent": "[variables('rawContent')]"
+      }
+    }
+  ]
 }
