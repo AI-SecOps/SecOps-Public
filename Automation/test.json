@@ -21,7 +21,7 @@
       "192.168.0.5,TRUE"
     ],
     "rawContent": "[concat(join(variables('rawCsvLines'), '\r\n'), '\r\n')]",
-    "watchlistName": "MSSE_Trusted_IPs",
+    "watchlistName": "[utcNow()]",
   },
   "resources": [
     {
