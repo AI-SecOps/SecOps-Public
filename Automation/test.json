@@ -40,7 +40,7 @@
         "contentType": "Text/Csv",
         "numberOfLinesToSkip": 0,
         "itemsSearchKey": "[variables('itemsSearchKey')]",
-        "rawContent": "[variables('rawContent')]"
+        "rawContent": "IP_Address,Subnet\r\n127.0.0.1,FALSE\r\n"
       },
       "dependsOn": []
     }
