@@ -16,11 +16,11 @@
     "itemsSearchKey": "IP_Address",
     "rawCsvLines": [
       "IP_Address,Subnet",
-      "127.0.0.1,FALSE",
+      "192.168.0.1,FALSE",
       "127.0.0.2,TRUE",
       "10.0.0.1,TRUE",
       "10.0.0.2,FALSE",
-      "192.168.0.1,TRUE"
+      "192.168.0.5,TRUE"
     ],
     "rawContent": "[concat(join(variables('rawCsvLines'), '\r\n'), '\r\n')]"
   },
