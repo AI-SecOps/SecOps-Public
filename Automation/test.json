@@ -29,6 +29,10 @@
       "type": "Microsoft.OperationalInsights/workspaces/providers/Watchlists",
       "apiVersion": "2022-08-01",
       "name": "[concat(parameters('workspace'), '/Microsoft.SecurityInsights/', variables('watchlistName'))]",
+      "location": "[resourceGroup().location]",
+      "tags": {
+        "lastDeployed": "[utcNow()]"
+      },
       "properties": {
         "displayName": "[variables('watchlistName')]",
         "source": "[variables('sourceFile')]",
