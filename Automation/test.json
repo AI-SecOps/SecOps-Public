@@ -1,51 +1,556 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "parameters": {
-    "workspace": {
-      "type": "string",
-      "metadata": {
-        "description": "Log Analytics workspace name where Sentinel is enabled."
-      }
-    }
-  },
-  "variables": {
-    "watchlistName": "MSSE_Trusted_IPs",
-    "sourceFile": "trusted_ips.csv",
-    "description": "List of trusted IPs for the organization",
-    "itemsSearchKey": "IP_Address",
-    "rawCsvLines": [
-      "IP_Address,Subnet",
-      "192.168.0.1,FALSE",
-      "127.0.0.2,TRUE",
-      "192.168.0.5,TRUE"
-    ],
-    "rawContent": "[concat(join(variables('rawCsvLines'), '\r\n'), '\r\n')]",
-    "watchlistName": "[utcNow()]",
-  },
-  "resources": [
-    {
-      "type": "Microsoft.OperationalInsights/workspaces/providers/Watchlists",
-      "apiVersion": "2022-08-01",
-      "name": "[concat(parameters('workspace'), '/Microsoft.SecurityInsights/', variables('watchlistName'))]",
-      "location": "[resourceGroup().location]",
-      "tags": {
-        "lastDeployed": "[variables('deploymentTimestamp')]"
-      },
-      "properties": {
-        "displayName": "[variables('watchlistName')]",
-        "source": "[variables('sourceFile')]",
-        "description": "[variables('description')]",
-        "provider": "Custom",
-        "isDeleted": false,
-        "labels": [],
-        "defaultDuration": "P1000Y",
-        "contentType": "Text/Csv",
-        "numberOfLinesToSkip": 0,
-        "itemsSearchKey": "[variables('itemsSearchKey')]",
-        "rawContent": "[variables('rawContent')]"
-      },
-      "dependsOn": []
-    }
-  ]
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "LogicAppName": {
+            "defaultValue": "ThreatBriefing",
+            "type": "String"
+        },
+        "userAssignedIdentityName": {
+            "defaultValue": "AzOpenAI_MI",
+            "type": "String",
+            "metadata": {
+                "description": "This is the User Assigned Managed Identity with 'Cognitive Services OpenAI User' Role at resource level"
+            }
+        }
+    },
+    "variables": {
+        "userAssignedIdentityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('userAssignedIdentityName'))]",
+        "connections_rss_externalid": "[resourceId('Microsoft.Web/connections/', 'rss')]",
+        "connections_azureopenai_externalid": "[resourceId('Microsoft.Web/connections/', 'azureopenai')]",
+        "connections_conversionservice_externalid": "[resourceId('Microsoft.Web/connections/', 'conversionservice')]",
+        "resourceGroupLocation": "[resourceGroup().location]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "dependsOn": [  
+                "rss",  
+                "azureopenai",  
+                "conversionservice"
+            ],
+            "name": "[parameters('LogicAppName')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                    "[variables('userAssignedIdentityId')]": {}
+                }
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "ThreatFeeds": {
+                            "defaultValue": [
+                                "https://www.microsoft.com/en-us/security/blog/feed/",
+                                "https://msrc.microsoft.com/blog/feed",
+                                "https://blog.qualys.com/feed",
+                                "https://feeds.fortinet.com/fortinet/blog/threat-research",
+                                "https://news.sophos.com/feed/",
+                                "http://feeds.arstechnica.com/arstechnica/index",
+                                "https://buttondown.email/CybersecNewsWeekly/rss",
+                                "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+                                "https://www.cybereason.com/blog/rss.xml",
+                                "https://www.sentinelone.com/feed/",
+                                "https://blog.talosintelligence.com/rss/",
+                                "https://thedfirreport.com/feed/",
+                                "https://blog.bushidotoken.net/feeds/posts/default",
+                                "https://www.mandiant.com/resources/blog/rss.xml",
+                                "https://unit42.paloaltonetworks.com/feed/",
+                                "https://www.crowdstrike.com/blog/feed",
+                                "https://socradar.io/feed/",
+                                "https://threatpost.com/feed/",
+                                "https://www.cisecurity.org/feed/advisories",
+                                "https://research.checkpoint.com/feed/",
+                                "https://shorsec.io/feed/",
+                                "https://feeds.feedburner.com/TheHackersNews",
+                                "https://www.malwarebytes.com/blog/feed/index.xml",
+                                "https://blog.blacklanternsecurity.com/feed",
+                                "https://www.netscaler.com/blog/feed/",
+                                "https://blog.google/threat-analysis-group/rss/",
+                                "https://cloudblog.withgoogle.com/topics/threat-intelligence/rss/",
+                                "https://krebsonsecurity.com/feed/",
+                                "https://grahamcluley.com/feed/",
+                                "https://www.schneier.com/feed/atom/",
+                                "https://cyble.com/feed/",
+                                "https://malware.news/latest.rss",
+                                "https://blog.phylum.io/rss/",
+                                "https://blog.rapid7.com/rss/",
+                                "https://www.redhat.com/en/rss/blog/channel/security",
+                                "https://www.sonatype.com/blog/rss.xml",
+                                "https://blog.sucuri.net/feed",
+                                "https://www.synack.com/feed/",
+                                "https://www.tenable.com/security/research/feed",
+                                "https://www.zerodayinitiative.com/blog?format=rss",
+                                "https://venturebeat.com/category/security/feed/",
+                                "https://scotthelme.co.uk/rss/",
+                                "https://www.scmagazine.com/feed/topic/threat-management",
+                                "https://www.sans.org/blog/feed.xml",
+                                "https://linuxsecurity.com/advisories/oracle?format=feed&amp;type=rss",
+                                "https://linuxsecurity.com/advisories/debian?format=feed&amp;type=rss",
+                                "https://linuxsecurity.com/advisories/ubuntu?format=feed&amp;type=rss",
+                                "https://linuxsecurity.com/advisories/red-hat?format=feed&amp;type=rss",
+                                "https://aws.amazon.com/security/security-bulletins/rss/feed/",
+                                "https://healthitsecurity.com/feed",
+                                "https://hackread.com/feed/",
+                                "https://www.govinfosecurity.com/rss-feeds",
+                                "https://www.f5.com/labs/rss-feeds/all.xml",
+                                "https://www.exploit-db.com/rss.xml",
+                                "https://embracethered.com/blog/index.xml",
+                                "https://www.reliaquest.com/blog/feed/",
+                                "https://daniel.haxx.se/blog/feed/",
+                                "https://www.cybersecuritydive.com/feeds/news/",
+                                "https://www.tenable.com/blog/cyber-exposure-alerts/feed",
+                                "https://decoded.avast.io/feed/",
+                                "https://palant.info/rss.xml",
+                                "https://www.bleepingcomputer.com/feed/"
+                            ],
+                            "type": "Array"
+                        },
+                        "Days": {
+                            "defaultValue": 7,
+                            "type": "Int"
+                        },
+                        "UrlResearch": {
+                            "defaultValue": [],
+                            "type": "Array"
+                        },
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "recurrence": {
+                                "interval": 1,
+                                "frequency": "Day"
+                            },
+                            "evaluatedRecurrence": {
+                                "interval": 1,
+                                "frequency": "Day"
+                            },
+                            "type": "Recurrence"
+                        }
+                    },
+                    "actions": {
+                        "For_each_rss": {
+                            "foreach": "@parameters('ThreatFeeds')",
+                            "actions": {
+                                "List_RSS_items": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['rss']['connectionId']"
+                                            }
+                                        },
+                                        "method": "get",
+                                        "path": "/ListFeedItems",
+                                        "queries": {
+                                            "feedUrl": "@{decodeUriComponent(items('For_each_rss'))}",
+                                            "since": "@addDays(utcNow(), sub(0, parameters('Days')))",
+                                            "sinceProperty": "PublishDate"
+                                        }
+                                    }
+                                },
+                                "Feeds_Available": {
+                                    "actions": {
+                                        "Select_Fields": {
+                                            "type": "Select",
+                                            "inputs": {
+                                                "from": "@body('List_RSS_items')",
+                                                "select": {
+                                                    "primaryLink": "@item()?['primaryLink']",
+                                                    "publishDate": "@item()?['publishDate']",
+                                                    "title": "@item()['title']"
+                                                }
+                                            }
+                                        },
+                                        "For_each_feeds": {
+                                            "foreach": "@body('Select_Fields')",
+                                            "actions": {
+                                                "Categorize_Feeds": {
+                                                    "type": "ApiConnection",
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['azureopenai']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "post",
+                                                        "body": {
+                                                            "messages": [
+                                                                {
+                                                                    "role": "system",
+                                                                    "content": "You will receive a JSON object with the keys primaryLink, publishDate, title, and an empty category. Your sole task is to assign the category field by choosing one of these predefined values based on context of the title and primaryLink:\n• Threat Actor\n• Vulnerability\n• Ransomware\n• Attack Campaign\n• Breach\n• Outage\n• Crypto\n• General\nRespond with the complete JSON only."
+                                                                },
+                                                                {
+                                                                    "role": "user",
+                                                                    "content": "@{items('For_each_feeds')}"
+                                                                }
+                                                            ],
+                                                            "temperature": 1,
+                                                            "top_p": 1,
+                                                            "stream": false,
+                                                            "max_tokens": 32768,
+                                                            "presence_penalty": 0,
+                                                            "frequency_penalty": 0,
+                                                            "n": 1,
+                                                            "seed": 0,
+                                                            "logprobs": true,
+                                                            "response_format": {
+                                                                "type": "text"
+                                                            }
+                                                        },
+                                                        "path": "/2024-02-15-preview/deployments/@{encodeURIComponent('gpt-4.1-mini')}/chat/completions",
+                                                        "queries": {
+                                                            "api-version": "2024-12-01-preview"
+                                                        }
+                                                    }
+                                                },
+                                                "Is_Threat": {
+                                                    "actions": {
+                                                        "Append_to_array_SourceRSS": {
+                                                            "runAfter": {
+                                                                "Content_Analysis_and_Summarization": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "AppendToArrayVariable",
+                                                            "inputs": {
+                                                                "name": "SourceRSS",
+                                                                "value": "@json(first(body('Content_Analysis_and_Summarization')['choices'])?['message']?['content'])"
+                                                            }
+                                                        },
+                                                        "HTTP": {
+                                                            "type": "Http",
+                                                            "inputs": {
+                                                                "uri": "@if(\r\n  contains(toLower(outputs('Category_Response')['primaryLink']), 'fortinet.com'),\r\n  trim(concat('https://www.fortinet.com/',toLower(replace(split(outputs('Category_Response')['primaryLink'], '/fortinet/')[1],'~','/')))),\r\n  outputs('Category_Response')['primaryLink']\r\n)",
+                                                                "method": "GET"
+                                                            },
+                                                            "runtimeConfiguration": {
+                                                                "contentTransfer": {
+                                                                    "transferMode": "Chunked"
+                                                                }
+                                                            }
+                                                        },
+                                                        "Html_to_text": {
+                                                            "runAfter": {
+                                                                "HTTP": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "ApiConnection",
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['conversionservice']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "body": "<p class=\"editor-paragraph\">@{body('HTTP')}</p>",
+                                                                "path": "/html2text"
+                                                            }
+                                                        },
+                                                        "Content_Analysis_and_Summarization": {
+                                                            "runAfter": {
+                                                                "Html_to_text": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "ApiConnection",
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azureopenai']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "body": {
+                                                                    "messages": [
+                                                                        {
+                                                                            "role": "system",
+                                                                            "content": "You will receive a JSON object with the following keys:\n- primaryLink (string)\n- publishDate (string)\n- title (string)\n- category (string)\n- content (string): the complete raw webpage text, including any boilerplate or unrelated sections to be filtered when extracting relevant information.\n\nAnalyze the content and produce a JSON object with exactly these fields:\n\n1. primaryLink  \n2. publishDate  \n3. title  \n4. category  \n5. summary (string): a coherent summary in at least five sentences, aligned with the article’s title.  \n6. industry (string): the specific industry impacted.  \n7. countryOrRegion (string): the country or region affected.  \n8. IOCs (object): group all Indicators of Compromise by type. Defang each IOC (e.g., “1[.]2[.]3[.]4”).  \n   • IP (array of strings)  \n   • URL (array of strings)  \n   • FileHash (array of strings)  \n9. CVEs (array of strings): all CVE identifiers found.  \n10. huntingQueries (array of objects): each with:  \n    • name (string, or empty if none)  \n    • query (string, the full KQL text)\n\nRespond only with the JSON—no extra commentary or markdown.  \nIf a section has no data, return an empty array or empty string as appropriate."
+                                                                        },
+                                                                        {
+                                                                            "role": "user",
+                                                                            "content": "@{outputs('Category_Response')}\n\ncontent:\n@{body('Html_to_text')}"
+                                                                        }
+                                                                    ],
+                                                                    "temperature": 1,
+                                                                    "top_p": 1,
+                                                                    "stream": false,
+                                                                    "max_tokens": 32768,
+                                                                    "presence_penalty": 0,
+                                                                    "frequency_penalty": 0,
+                                                                    "n": 1,
+                                                                    "seed": 0,
+                                                                    "logprobs": true,
+                                                                    "response_format": {
+                                                                        "type": "text"
+                                                                    }
+                                                                },
+                                                                "path": "/2024-02-15-preview/deployments/@{encodeURIComponent('gpt-4.1')}/chat/completions",
+                                                                "queries": {
+                                                                    "api-version": "2024-12-01-preview"
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Category_Response": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "else": {
+                                                        "actions": {}
+                                                    },
+                                                    "expression": {
+                                                        "and": [
+                                                            {
+                                                                "not": {
+                                                                    "equals": [
+                                                                        "@outputs('Category_Response')?['category']",
+                                                                        "Outage"
+                                                                    ]
+                                                                }
+                                                            },
+                                                            {
+                                                                "not": {
+                                                                    "equals": [
+                                                                        "@outputs('Category_Response')?['category']",
+                                                                        "Crypto"
+                                                                    ]
+                                                                }
+                                                            },
+                                                            {
+                                                                "not": {
+                                                                    "equals": [
+                                                                        "@outputs('Category_Response')?['category']",
+                                                                        "General"
+                                                                    ]
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    "type": "If"
+                                                },
+                                                "Category_Response": {
+                                                    "runAfter": {
+                                                        "Categorize_Feeds": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Compose",
+                                                    "inputs": "@json(first(body('Categorize_Feeds')['choices'])?['message']?['content'])"
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Select_Fields": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Foreach"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "List_RSS_items": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "expression": {
+                                        "and": [
+                                            {
+                                                "greater": [
+                                                    "@length(body('List_RSS_items'))",
+                                                    0
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "type": "If"
+                                },
+                                "HTTP_GET": {
+                                    "runAfter": {
+                                        "List_RSS_items": [
+                                            "Failed",
+                                            "TimedOut",
+                                            "Skipped"
+                                        ]
+                                    },
+                                    "type": "Http",
+                                    "inputs": {
+                                        "uri": "@{items('For_each_rss')}",
+                                        "method": "GET"
+                                    },
+                                    "runtimeConfiguration": {
+                                        "contentTransfer": {
+                                            "transferMode": "Chunked"
+                                        }
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "Initialize_SourceRSS": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Foreach"
+                        },
+                        "Initialize_SourceRSS": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "SourceRSS",
+                                        "type": "array",
+                                        "value": []
+                                    }
+                                ]
+                            }
+                        },
+                        "Create_Threat_Report": {
+                            "runAfter": {
+                                "For_each_rss": [
+                                    "Succeeded",
+                                    "TimedOut",
+                                    "Skipped",
+                                    "Failed"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azureopenai']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "messages": [
+                                        {
+                                            "role": "system",
+                                            "content": "You will receive an multi-json array of threat feeds information. Your task is to generate a threat briefing report titled \"Daily Threat Feeds Report (OpenSource)\" for the week in an optimized professional HTML format for Teams Chat Message readable for both \"dark mode and light mode\". The report should be presented in the following structure:\n\n# Daily Threat Feeds Report (OpenSource)\nReporting Period: Week of {Date Range}\n\n## Executive Summary\nA quick overview of the most critical threats identified over the past period, high-risk entities targeted, and key response actions.\n\n## Threat Landscape Overview\n- Global and regional threat trends\n- Latest threat actor campaigns (e.g., APTs, ransomware groups)\n- Significant vulnerabilities (e.g., zero-days, CVEs)\n\n## Incidents or IOCs Observed\n- Major breaches observed (if any)\n- Indicators of Compromise (IP addresses, file hashes, domains)\n- Attack Patterns\n\n## Summary of Latest Cyber Threats:\n\nInclude a table with the following columns:\n- Threat Name and/or CVE (with hyperlink to Threat Intel)\n- Published Date\n- Impacted Assets, or Applications\n- Impact\n- Severity\n- Brief Description of the threat or vulnerability\n\n## Summary of Recommendations:\n\nBulleted list of remediation steps actions based on priority\n\n## Threat Hunting scenarios:\n\nInclude a numbered hunting list with the following details:\n- Scenario Name\n- Scenario Description (a brief summary and what suspicious behavior to hunt)\n- MITRE TTPs\n- KQL Hunting Query (related to the threat)\n- Recommended Actions\n\n------------------------------\nAdditional Instructions:\n\n- Starts with the below for the Main Title and followed by other information with the line separations in between sections.\n\n<p class=\"\\&quot;editor-paragraph\\&quot;\"></p><h2 style=\"\\&quot;font-family:\">Daily Threat Feeds Report (OpenSource)</h2>\n<p style=\"font-family: Arial, sans-serif; font-size: 12px;\">\n\n- include line separation for each section\n\n- conclude it with a sign-off footer message using smaller font non-bold.\n\"Report Compiled by: Daily Threat Feeds (OpenSource) Automation\" \n\"Powered by: Azure OpenAI GPT-4.1\""
+                                        },
+                                        {
+                                            "role": "user",
+                                            "content": "@{variables('SourceRSS')}"
+                                        }
+                                    ],
+                                    "temperature": 1,
+                                    "top_p": 1,
+                                    "stream": false,
+                                    "max_tokens": 32768,
+                                    "presence_penalty": 0,
+                                    "frequency_penalty": 0,
+                                    "n": 1,
+                                    "seed": 0,
+                                    "logprobs": true,
+                                    "response_format": {
+                                        "type": "text"
+                                    }
+                                },
+                                "path": "/2024-02-15-preview/deployments/@{encodeURIComponent('gpt-4.1')}/chat/completions",
+                                "queries": {
+                                    "api-version": "2024-12-01-preview"
+                                }
+                            }
+                        },
+                        "Teams_Message": {
+                            "runAfter": {
+                                "Create_Threat_Report": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@first(body('Create_Threat_Report')['choices'])?['message']?['content']"
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "rss": {
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'rss')]",
+                                "connectionId": "[variables('connections_rss_externalid')]",
+                                "connectionName": "rss"
+                            },
+                            "azureopenai": {
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'azureopenai')]",
+                                "connectionId": "[variables('connections_azureopenai_externalid')]",
+                                "connectionName": "azureopenai",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity",
+                                        "identity": "[variables('userAssignedIdentityId')]"
+                                    }
+                                }
+                            },
+                            "conversionservice": {
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'conversionservice')]",
+                                "connectionId": "[variables('connections_conversionservice_externalid')]",
+                                "connectionName": "conversionservice"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "rss",
+            "location": "[variables('resourceGroupLocation')]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "rss",
+                "customParameterValues": {},
+                "api": {
+                    "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'), 'rss')]"
+                }
+            }
+        },
+        {
+        "type": "Microsoft.Web/connections",
+        "apiVersion": "2016-06-01",
+        "name": "conversionservice",
+        "location": "[variables('resourceGroupLocation')]",
+        "properties": {
+            "displayName": "Conversion Service Connector",
+            "api": {
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'),'conversionservice')]"
+            },
+            "parameterValueSet": {
+                "name": "managedIdentityAuth",
+                "values": {}
+                }
+            }
+        },
+        {  
+        "type": "Microsoft.Web/connections",  
+        "apiVersion": "2016-06-01",  
+        "name": "azureopenai",  
+        "location": "[variables('resourceGroupLocation')]",  
+        "properties": {  
+            "displayName": "azureopenai",  
+            "api": {  
+            "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('resourceGroupLocation'),'azureopenai')]"  
+            },  
+            "parameterValueSet": {  
+            "name": "managedIdentityAuth",  
+            "values": {}  
+            }  
+        }  
+        }  
+    ]
 }
